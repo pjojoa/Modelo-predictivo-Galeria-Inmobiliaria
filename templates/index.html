@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa de Proyectos Inmobiliarios - Cali</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- CSS personalizado -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Header -->
+    <header class="main-header">
+        <div class="container">
+            <h1><i class="fas fa-map-marked-alt"></i> Mapa Interactivo de Proyectos Inmobiliarios</h1>
+            <p><i class="fas fa-map-marker-alt"></i> Cali, Colombia</p>
+        </div>
+    </header>
+
+    <!-- Contenedor principal -->
+    <div class="container main-container">
+        <!-- Sidebar de filtros -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2><i class="fas fa-filter"></i> Filtros</h2>
+            </div>
+            
+            <div class="filter-section">
+                <label for="clasificacion">Clasificación</label>
+                <select id="clasificacion" class="filter-select">
+                    <option value="Todos">Todos</option>
+                </select>
+            </div>
+            
+            <div class="filter-section">
+                <label for="zona">Zona</label>
+                <select id="zona" class="filter-select">
+                    <option value="Todas">Todas</option>
+                </select>
+            </div>
+            
+            <div class="filter-section">
+                <label for="barrio">Barrio</label>
+                <select id="barrio" class="filter-select">
+                    <option value="Todos">Todos</option>
+                </select>
+            </div>
+            
+            <div class="filter-section">
+                <label for="tipo_vis">Tipo VIS</label>
+                <select id="tipo_vis" class="filter-select">
+                    <option value="Todos">Todos</option>
+                </select>
+            </div>
+            
+            <div class="filter-section">
+                <label for="precio_range">Rango de Precio (COP)</label>
+                <div class="price-range">
+                    <input type="number" id="precio_min" class="price-input" placeholder="Mínimo">
+                    <span class="price-separator">-</span>
+                    <input type="number" id="precio_max" class="price-input" placeholder="Máximo">
+                </div>
+                <button id="aplicar_precio" class="btn-apply">Aplicar</button>
+            </div>
+            
+            <div class="sidebar-stats">
+                <h3><i class="fas fa-chart-pie"></i> Estadísticas</h3>
+                <div class="stat-item">
+                    <span class="stat-label">Total Proyectos</span>
+                    <span class="stat-value" id="total-proyectos">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Exitosos</span>
+                    <span class="stat-value" id="exitosos">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Moderados</span>
+                    <span class="stat-value" id="moderados">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Mejorables</span>
+                    <span class="stat-value" id="mejorables">0</span>
+                </div>
+            </div>
+            
+            <div class="sidebar-info">
+                <details>
+                    <summary><i class="fas fa-question-circle"></i> ¿Cómo se clasifican los proyectos?</summary>
+                    <div class="info-content">
+                        <h4>Sistema de Clasificación de Proyectos</h4>
+                        
+                        <p>Los proyectos se clasifican en tres categorías basándose en múltiples métricas y un modelo de Machine Learning avanzado:</p>
+                        
+                        <div class="classification-detail">
+                            <h5><i class="fas fa-check-circle" style="color: #27AE60;"></i> Exitosos</h5>
+                            <ul>
+                                <li><strong>Score de Éxito:</strong> 0.62 - 0.79</li>
+                                <li><strong>Velocidad de ventas:</strong> Alta (típicamente 22+ unidades/mes)</li>
+                                <li><strong>Meses para agotar:</strong> Menos de 18 meses</li>
+                                <li><strong>Características:</strong> Proyectos con excelente desempeño, alta demanda y rápida rotación de inventario</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="classification-detail">
+                            <h5><i class="fas fa-exclamation-circle" style="color: #F39C12;"></i> Moderados</h5>
+                            <ul>
+                                <li><strong>Score de Éxito:</strong> 0.50 - 0.62</li>
+                                <li><strong>Velocidad de ventas:</strong> Media (típicamente 8-22 unidades/mes)</li>
+                                <li><strong>Meses para agotar:</strong> 18 - 36 meses</li>
+                                <li><strong>Características:</strong> Proyectos con desempeño estándar, ventas constantes pero no excepcionales</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="classification-detail">
+                            <h5><i class="fas fa-times-circle" style="color: #E74C3C;"></i> Mejorables</h5>
+                            <ul>
+                                <li><strong>Score de Éxito:</strong> 0.21 - 0.50</li>
+                                <li><strong>Velocidad de ventas:</strong> Baja (menos de 8 unidades/mes)</li>
+                                <li><strong>Meses para agotar:</strong> Más de 36 meses</li>
+                                <li><strong>Características:</strong> Proyectos que requieren atención, con bajas ventas y necesidad de estrategias de mejora</li>
+                            </ul>
+                        </div>
+                        
+                        <h5>Factores Considerados en la Clasificación:</h5>
+                        <ul class="factors-list">
+                            <li><strong>Velocidad de ventas:</strong> Unidades vendidas por mes</li>
+                            <li><strong>Tiempo de agotamiento:</strong> Meses estimados para vender el inventario disponible</li>
+                            <li><strong>Penetración de mercado:</strong> Porcentaje de unidades vendidas vs. total</li>
+                            <li><strong>Velocidad histórica:</strong> Tendencia de ventas a lo largo del tiempo</li>
+                            <li><strong>Posición de precio:</strong> Comparación con proyectos similares en la zona/estrato</li>
+                            <li><strong>Segmentación:</strong> Clasificación por Zona, Estrato y Tipo VIS para comparaciones justas</li>
+                            <li><strong>Modelo ML:</strong> RandomForest Regressor para predecir meses de agotamiento</li>
+                            <li><strong>Score Compuesto:</strong> Métrica combinada que integra múltiples factores</li>
+                        </ul>
+                        
+                        <p><strong>Nota:</strong> La clasificación se realiza por segmentos (Zona/Estrato/Tipo VIS) para asegurar comparaciones justas entre proyectos similares.</p>
+                    </div>
+                </details>
+            </div>
+        </aside>
+
+        <!-- Contenido principal -->
+        <main class="main-content">
+            <!-- Sección de información -->
+            <div class="info-section">
+                <div class="info-header">
+                    <h2><i class="fas fa-chart-line"></i> Visualización de proyectos clasificados por desempeño</h2>
+                    <button class="info-toggle" id="info-toggle">
+                        <i class="fas fa-info-circle"></i> Información
+                    </button>
+                </div>
+                
+                <div class="info-panel" id="info-panel" style="display: none;">
+                    <h3><i class="fas fa-chart-bar"></i> Método de Clasificación de Proyectos</h3>
+                    <p>Los proyectos se clasifican mediante un <strong>Score de Éxito</strong> que combina múltiples métricas de desempeño.</p>
+                    
+                    <div class="classification-cards">
+                        <div class="card-success">
+                            <h4><i class="fas fa-check-circle"></i> PROYECTOS EXITOSOS</h4>
+                            <p><strong>Score:</strong> 0.62-0.79 (promedio: 0.68)</p>
+                            <p><strong>Velocidad:</strong> Alta - 22+ unidades/mes</p>
+                            <p><strong>Patrón:</strong> Acelerado o Constante</p>
+                        </div>
+                        
+                        <div class="card-moderate">
+                            <h4><i class="fas fa-exclamation-circle"></i> PROYECTOS MODERADOS</h4>
+                            <p><strong>Score:</strong> 0.50-0.62 (promedio: 0.55)</p>
+                            <p><strong>Velocidad:</strong> Media - 8-9 unidades/mes</p>
+                            <p><strong>Patrón:</strong> Constante o Desacelerado</p>
+                        </div>
+                        
+                        <div class="card-improve">
+                            <h4><i class="fas fa-times-circle"></i> PROYECTOS MEJORABLES</h4>
+                            <p><strong>Score:</strong> 0.21-0.50 (promedio: 0.44)</p>
+                            <p><strong>Velocidad:</strong> Baja o decreciente</p>
+                            <p><strong>Patrón:</strong> Constante o Desacelerado</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Métricas principales -->
+            <div class="metrics-grid">
+                <div class="metric-card metric-success">
+                    <div class="metric-icon"><i class="fas fa-check-circle"></i></div>
+                    <div class="metric-label">Exitosos</div>
+                    <div class="metric-value" id="metric-exitosos">0</div>
+                </div>
+                <div class="metric-card metric-moderate">
+                    <div class="metric-icon"><i class="fas fa-exclamation-circle"></i></div>
+                    <div class="metric-label">Moderados</div>
+                    <div class="metric-value" id="metric-moderados">0</div>
+                </div>
+                <div class="metric-card metric-improve">
+                    <div class="metric-icon"><i class="fas fa-times-circle"></i></div>
+                    <div class="metric-label">Mejorables</div>
+                    <div class="metric-value" id="metric-mejorables">0</div>
+                </div>
+                <div class="metric-card metric-score">
+                    <div class="metric-icon"><i class="fas fa-star"></i></div>
+                    <div class="metric-label">Score Promedio</div>
+                    <div class="metric-value" id="metric-score">0.00</div>
+                </div>
+            </div>
+
+            <!-- Mapa -->
+            <div class="map-container">
+                <h3><i class="fas fa-map"></i> <span id="map-count">0</span> proyectos en el mapa</h3>
+                <div id="map"></div>
+            </div>
+
+            <!-- Tabla de proyectos -->
+            <div class="table-container">
+                <div class="table-header">
+                    <h3><i class="fas fa-table"></i> Tabla de Proyectos <span id="table-count" class="table-count">(0 proyectos)</span></h3>
+                    <button id="btn-download" class="btn-download">
+                        <i class="fas fa-download"></i> Descargar CSV
+                    </button>
+                </div>
+                <div class="table-wrapper">
+                    <table id="proyectos-table">
+                        <thead>
+                            <tr>
+                                <th class="sortable" data-column="codigo">
+                                    <span>Código</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="nombre">
+                                    <span>Proyecto</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="clasificacion">
+                                    <span>Clasificación</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="barrio">
+                                    <span>Barrio</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="zona">
+                                    <span>Zona</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="precio_promedio">
+                                    <span>Precio Promedio</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="area_promedio">
+                                    <span>Área (m²)</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="velocidad_ventas">
+                                    <span>Velocidad Ventas</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="unidades_vendidas">
+                                    <span>Unid. Vendidas</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="unidades_disponibles">
+                                    <span>Unid. Disponibles</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                                <th class="sortable" data-column="score_exito">
+                                    <span>Score Éxito</span>
+                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body">
+                            <tr>
+                                <td colspan="11" class="loading">Cargando datos...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Cargando datos...</p>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    
+    <!-- JavaScript personalizado -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
+
