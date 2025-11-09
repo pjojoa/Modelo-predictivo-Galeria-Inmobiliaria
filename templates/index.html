@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <!-- Leaflet Heat CSS (no hay CSS específico, se incluye en JS) -->
     
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -28,10 +29,19 @@
     <!-- Contenedor principal -->
     <div class="container main-container">
         <!-- Sidebar de filtros -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <h2><i class="fas fa-filter"></i> Filtros</h2>
+                <div class="sidebar-controls">
+                    <button class="sidebar-toggle" id="sidebar-toggle" title="Colapsar/Expandir">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <button class="sidebar-resize" id="sidebar-resize" title="Cambiar ancho">
+                        <i class="fas fa-arrows-alt-h"></i>
+                    </button>
+                </div>
             </div>
+            <div class="sidebar-content" id="sidebar-content">
             
             <div class="filter-section">
                 <label for="clasificacion">Clasificación</label>
@@ -64,8 +74,8 @@
             <div class="filter-section">
                 <label for="estado">Estado del Proyecto</label>
                 <select id="estado" class="filter-select">
+                    <option value="Activos" selected>Activos</option>
                     <option value="Todos">Todos</option>
-                    <option value="Activos">Activos</option>
                     <option value="Inactivos">Inactivos</option>
                 </select>
             </div>
@@ -73,11 +83,23 @@
             <div class="filter-section">
                 <label for="precio_range">Rango de Precio (COP)</label>
                 <div class="price-range">
-                    <input type="number" id="precio_min" class="price-input" placeholder="Mínimo">
+                    <div class="price-input-group">
+                        <label for="precio_min" class="price-label">Mínimo</label>
+                        <input type="number" id="precio_min" class="price-input" placeholder="Mínimo" min="0" step="100000">
+                    </div>
                     <span class="price-separator">-</span>
-                    <input type="number" id="precio_max" class="price-input" placeholder="Máximo">
+                    <div class="price-input-group">
+                        <label for="precio_max" class="price-label">Máximo</label>
+                        <input type="number" id="precio_max" class="price-input" placeholder="Máximo" min="0" step="100000">
+                    </div>
                 </div>
-                <button id="aplicar_precio" class="btn-apply">Aplicar</button>
+                <div class="price-range-info">
+                    <small id="precio_range_info" class="price-info-text">Rango completo disponible</small>
+                </div>
+                <div class="price-buttons">
+                    <button id="aplicar_precio" class="btn-apply">Aplicar Filtro</button>
+                    <button id="limpiar_precio" class="btn-clear">Limpiar</button>
+                </div>
             </div>
             
             <div class="sidebar-stats">
@@ -185,6 +207,7 @@
                     </div>
                 </details>
             </div>
+            </div> <!-- Cierre de sidebar-content -->
         </aside>
 
         <!-- Contenido principal -->
@@ -256,7 +279,80 @@
                 <!-- Mapa -->
                 <div class="map-container">
                     <h3><i class="fas fa-map"></i> <span id="map-count">0</span> proyectos en el mapa</h3>
-                    <div id="map"></div>
+                    <div id="map">
+                        <!-- Toolbar de controles del mapa -->
+                        <div class="map-controls-toolbar" id="map-controls-toolbar" role="toolbar" aria-label="Controles del mapa">
+                        <div class="map-control-group">
+                            <label for="map-style-select" class="map-control-label">
+                                <i class="fas fa-layer-group"></i> Estilo
+                            </label>
+                            <select id="map-style-select" class="map-control-select" aria-label="Seleccionar estilo de mapa">
+                                <option value="satellite">Satélite</option>
+                                <option value="streets">Calles</option>
+                                <option value="terrain">Terreno</option>
+                                <option value="light">Claro</option>
+                                <option value="dark">Oscuro</option>
+                            </select>
+                        </div>
+                        
+                        <div class="map-control-group">
+                            <button id="center-data-btn" class="map-control-btn" aria-label="Centrar mapa en todos los proyectos" title="Centrar datos">
+                                <i class="fas fa-crosshairs"></i> Centrar
+                            </button>
+                        </div>
+                        
+                        <div class="map-control-group">
+                            <label class="map-control-checkbox-label">
+                                <input type="checkbox" id="cluster-toggle" class="map-control-checkbox" aria-checked="true" aria-label="Activar o desactivar agrupamiento de marcadores">
+                                <span class="checkbox-custom"></span>
+                                <span class="checkbox-label">Clústeres</span>
+                            </label>
+                        </div>
+                        
+                        <div class="map-control-group">
+                            <label class="map-control-checkbox-label">
+                                <input type="checkbox" id="heatmap-toggle" class="map-control-checkbox" aria-checked="false" aria-label="Activar o desactivar mapa de calor por precio">
+                                <span class="checkbox-custom"></span>
+                                <span class="checkbox-label">Calor</span>
+                            </label>
+                        </div>
+                        
+                        <div class="map-control-group">
+                            <label class="map-control-checkbox-label">
+                                <input type="checkbox" id="markers-toggle" class="map-control-checkbox" aria-checked="true" aria-label="Activar o desactivar marcadores de proyectos">
+                                <span class="checkbox-custom"></span>
+                                <span class="checkbox-label">Marcadores</span>
+                            </label>
+                        </div>
+                        </div>
+                        
+                        <!-- Leyenda del heatmap -->
+                        <div class="heatmap-legend" id="heatmap-legend" style="display: none;" role="region" aria-label="Leyenda del mapa de calor">
+                        <div class="heatmap-legend-header">
+                            <strong>Precio (COP)</strong>
+                        </div>
+                        <div class="heatmap-legend-gradient">
+                            <div class="heatmap-legend-item">
+                                <span class="heatmap-legend-color" style="background: #2c7bb6;"></span>
+                                <span class="heatmap-legend-text" id="heatmap-legend-low">Bajo</span>
+                            </div>
+                            <div class="heatmap-legend-item">
+                                <span class="heatmap-legend-color" style="background: #ffffbf;"></span>
+                                <span class="heatmap-legend-text" id="heatmap-legend-medium">Medio</span>
+                            </div>
+                            <div class="heatmap-legend-item">
+                                <span class="heatmap-legend-color" style="background: #d7191c;"></span>
+                                <span class="heatmap-legend-text" id="heatmap-legend-high">Alto</span>
+                            </div>
+                        </div>
+                        <div class="heatmap-legend-bar">
+                            <div class="heatmap-gradient-bar"></div>
+                        </div>
+                        <p class="heatmap-legend-note" style="font-size: 0.75rem; color: #666; margin-top: 0.5rem; text-align: center;">
+                            Normalización: P5-P95
+                        </p>
+                    </div>
+                    </div> <!-- Cierre de #map -->
                 </div>
                 
                 <!-- Ranking de Constructores -->
@@ -287,9 +383,9 @@
                 <!-- Tab: Tabla de Proyectos -->
                 <div class="tab-content active" id="tab-tabla">
                     <div class="table-container">
-                        <div class="table-header">
-                            <h3><i class="fas fa-table"></i> Tabla de Proyectos</h3>
-                            <button id="btn-download" class="btn-download">
+                        <div class="table-header-actions">
+                            <h3><i class="fas fa-table"></i> Vista Previa de Datos</h3>
+                            <button id="btn-descargar-csv" class="btn-download" title="Descargar todos los datos filtrados en CSV">
                                 <i class="fas fa-download"></i> Descargar CSV
                             </button>
                         </div>
@@ -317,8 +413,8 @@
                                             <span>Zona</span>
                                             <span class="sort-indicator"><i class="fas fa-sort"></i></span>
                                         </th>
-                                        <th class="sortable" data-column="constructor">
-                                            <span>Constructor</span>
+                                        <th class="sortable" data-column="vende">
+                                            <span>Vende</span>
                                             <span class="sort-indicator"><i class="fas fa-sort"></i></span>
                                         </th>
                                         <th class="sortable" data-column="precio_promedio">
@@ -384,6 +480,8 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <!-- Leaflet Heat JS -->
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.min.js"></script>
     
     <!-- JavaScript personalizado -->
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

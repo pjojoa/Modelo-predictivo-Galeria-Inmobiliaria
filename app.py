@@ -9,6 +9,7 @@ import utils
 from flask import Flask, render_template, jsonify, request, make_response
 import pandas as pd
 import numpy as np
+import io
 from datetime import datetime
 from pathlib import Path
 
@@ -111,7 +112,7 @@ def get_color_by_clasificacion(clasificacion):
     # Si no es válida, usar 'Moderado' como defecto (naranja) en lugar de gris
     return COLORES_CLASIFICACION.get('Moderado', '#F39C12')
 
-def apply_filters(df, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado='Todos'):
+def apply_filters(df, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado='Activos'):
     """Aplica filtros al DataFrame de manera eficiente usando máscaras booleanas."""
     if df.empty:
         return df
@@ -332,17 +333,20 @@ def generar_clasificacion_en_memoria(xlsx_path=None):
         else:
             print("  ⚠ No se pudieron analizar características de proyectos exitosos")
         
-        # Paso 11: Limpiar columnas temporales del proj_ds antes de generar archivo final
+        # Paso 11: Limpiar SOLO columnas realmente temporales (opcional - comentado para preservar todas las columnas)
+        # NOTA: Se preservan TODAS las columnas para permitir segmentación y visualizaciones avanzadas
+        # Si necesitas limpiar columnas temporales, descomenta el siguiente bloque:
+        """
         try:
-            columnas_temp = ['_segmento', '_metodo_clasificacion', '_es_anomalia', '_razon_anomalia']
-            columnas_a_eliminar = [col for col in columnas_temp if col in proj_ds.columns]
-            # Eliminar columnas intermedias de features, pero mantener las que se usan en el resultado
-            columnas_intermedias = [col for col in proj_ds.columns if col.startswith('_') and col not in ['_precio_m2_percentil_zona', '_precio_m2_percentil_estrato', '_velocidad_historica', '_porcentaje_vendido_feat']]
-            columnas_a_eliminar.extend(columnas_intermedias)
+            # Solo eliminar columnas de debugging/validación interna, NO las de features calculados
+            columnas_temp_estrictas = ['_segmento', '_metodo_clasificacion', '_es_anomalia', '_razon_anomalia']
+            columnas_a_eliminar = [col for col in columnas_temp_estrictas if col in proj_ds.columns]
             proj_ds = proj_ds.drop(columns=columnas_a_eliminar, errors='ignore')
-            print(f"  ✓ Columnas temporales limpiadas. DataFrame tiene {len(proj_ds)} filas")
+            print(f"  ✓ Columnas temporales de debugging limpiadas. DataFrame tiene {len(proj_ds)} filas")
         except Exception as e:
             print(f"⚠ Advertencia al limpiar columnas: {str(e)}")
+        """
+        print(f"  ✓ Preservando TODAS las columnas para análisis avanzado. DataFrame tiene {len(proj_ds)} filas y {len(proj_ds.columns)} columnas")
         
         # Paso 12: Generar DataFrame final con formato esperado
         print("11. Generando formato final...")
@@ -591,10 +595,10 @@ def proyecto_to_dict(row):
     if clasificacion not in clasificaciones_validas:
         clasificacion = 'Moderado'
     
-    # Obtener constructor y limpiar si es necesario
-    constructor = str(row.get('Constructor', 'N/A')).strip()
-    if constructor in ('nan', '', 'none', 'None'):
-        constructor = 'N/A'
+    # Obtener vendedor (columna Vende) y limpiar si es necesario
+    vende = str(row.get('Vende', 'N/A')).strip()
+    if vende in ('nan', '', 'none', 'None'):
+        vende = 'N/A'
     
     # Pre-calcular valores para evitar múltiples accesos
     precio = row.get('Precio_Promedio', 0)
@@ -611,7 +615,7 @@ def proyecto_to_dict(row):
         'barrio': str(row.get('Barrio', 'N/A')),
         'zona': str(row.get('Zona', 'N/A')),
         'estrato': str(row.get('Estrato', 'N/A')) if pd.notna(row.get('Estrato')) and pd.to_numeric(row.get('Estrato', 0), errors='coerce') != 0 else 'N/A',
-        'constructor': constructor,
+        'vende': vende,
         'precio_promedio': float(precio) if pd.notna(precio) else 0,
         'precio_formateado': format_currency(precio),
         'area_promedio': float(row.get('Area_Promedio', 0)) if pd.notna(row.get('Area_Promedio')) else 0,
@@ -788,7 +792,7 @@ def get_proyectos():
         tipo_vis = request.args.get('tipo_vis', 'Todos')
         precio_min = request.args.get('precio_min', None)
         precio_max = request.args.get('precio_max', None)
-        estado = request.args.get('estado', 'Todos')
+        estado = request.args.get('estado', 'Activos')  # Por defecto: Activos
         
         # Aplicar filtros
         df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado)
@@ -866,7 +870,7 @@ def get_estadisticas():
         tipo_vis = request.args.get('tipo_vis', 'Todos')
         precio_min = request.args.get('precio_min', None)
         precio_max = request.args.get('precio_max', None)
-        estado = request.args.get('estado', 'Todos')
+        estado = request.args.get('estado', 'Activos')  # Por defecto: Activos
         
         # Aplicar filtros usando función helper
         df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado)
@@ -907,10 +911,83 @@ def get_estadisticas():
             'error': str(e)
         }), 500
 
+@app.route('/api/dataset-completo')
+def get_dataset_completo():
+    """API para obtener el dataset completo con TODAS las columnas (originales + calculadas).
+    Útil para segmentación y visualizaciones avanzadas."""
+    try:
+        # Validar que df_data no esté vacío
+        if df_data.empty:
+            return jsonify({
+                'success': False,
+                'error': 'No hay datos disponibles. Verifica que el archivo Base Proyectos.xlsx exista y contenga datos.',
+                'proyectos': [],
+                'total': 0,
+                'columnas': []
+            }), 200
+        
+        # Obtener filtros de la query string
+        clasificacion = request.args.get('clasificacion', 'Todos')
+        zona = request.args.get('zona', 'Todas')
+        barrio = request.args.get('barrio', 'Todos')
+        tipo_vis = request.args.get('tipo_vis', 'Todos')
+        precio_min = request.args.get('precio_min', None)
+        precio_max = request.args.get('precio_max', None)
+        estado = request.args.get('estado', 'Activos')  # Por defecto: Activos
+        
+        # Aplicar filtros
+        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado)
+        
+        # Convertir TODAS las columnas a JSON
+        # Usar to_dict('records') para preservar todas las columnas
+        proyectos = df_filtered.to_dict('records')
+        
+        # Convertir NaN, None, y otros valores problemáticos a None para JSON
+        for proyecto in proyectos:
+            for key, value in proyecto.items():
+                if pd.isna(value):
+                    proyecto[key] = None
+                elif isinstance(value, pd.Timestamp):
+                    proyecto[key] = str(value)
+                elif isinstance(value, (np.integer, np.floating)):
+                    if isinstance(value, np.integer):
+                        proyecto[key] = int(value)
+                    elif isinstance(value, np.floating):
+                        proyecto[key] = None if np.isnan(value) else float(value)
+                    else:
+                        proyecto[key] = value.item() if hasattr(value, 'item') else value
+        
+        return jsonify({
+            'success': True,
+            'proyectos': proyectos,
+            'total': len(proyectos),
+            'columnas': list(df_filtered.columns),
+            'total_columnas': len(df_filtered.columns)
+        })
+    except Exception as e:
+        print(f"❌ Error en /api/dataset-completo: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'proyectos': [],
+            'total': 0,
+            'columnas': []
+        }), 500
+
 @app.route('/api/descargar')
 def descargar_csv():
-    """API para descargar datos en CSV."""
+    """API para descargar datos en CSV con TODAS las columnas."""
     try:
+        # Validar que df_data no esté vacío
+        if df_data.empty:
+            print("⚠ ADVERTENCIA: Intentando descargar CSV pero df_data está vacío")
+            return jsonify({
+                'success': False,
+                'error': 'No hay datos disponibles para descargar. Verifica que el archivo Base Proyectos.xlsx exista y contenga datos.'
+            }), 400
+        
         # Obtener filtros
         clasificacion = request.args.get('clasificacion', 'Todos')
         zona = request.args.get('zona', 'Todas')
@@ -923,18 +1000,39 @@ def descargar_csv():
         # Aplicar filtros usando función helper
         df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado)
         
-        # Crear CSV en memoria
-        output = io.StringIO()
-        df_filtered.to_csv(output, index=False, encoding='utf-8-sig')
-        output.seek(0)
+        # Validar que haya datos después de filtrar
+        if df_filtered.empty:
+            return jsonify({
+                'success': False,
+                'error': 'No hay datos que coincidan con los filtros seleccionados.'
+            }), 400
         
-        response = make_response(output.getvalue())
+        # Crear CSV en memoria con TODAS las columnas
+        # Usar StringIO para texto
+        output = io.StringIO()
+        
+        # Convertir DataFrame a CSV (sin encoding, pandas devuelve string)
+        df_filtered.to_csv(output, index=False)
+        output.seek(0)
+        csv_content = output.getvalue()
+        
+        # Convertir a bytes con UTF-8 BOM para Excel (utf-8-sig agrega BOM automáticamente)
+        csv_bytes = csv_content.encode('utf-8-sig')
+        
+        response = make_response(csv_bytes)
         response.headers['Content-Type'] = 'text/csv; charset=utf-8-sig'
         response.headers['Content-Disposition'] = f'attachment; filename=proyectos_filtrados_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
         
+        print(f"✓ CSV generado: {len(df_filtered)} proyectos, {len(df_filtered.columns)} columnas")
         return response
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"❌ Error en /api/descargar: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': f'Error al generar CSV: {str(e)}'
+        }), 500
 
 @app.route('/api/regenerar-clasificacion', methods=['POST'])
 def regenerar_clasificacion():
@@ -994,35 +1092,38 @@ def get_caracteristicas_exitosos():
             'error': str(e)
         }), 500
 
-def calcular_ranking_constructores(df, estado_filtro='Todos'):
-    """Calcula el ranking de constructores con estadísticas de proyectos.
+def calcular_ranking_constructores(df, estado_filtro='Activos'):
+    """Calcula el ranking de vendedores (columna "Vende") con estadísticas de proyectos.
     
     Args:
         df: DataFrame con proyectos
         estado_filtro: 'Todos', 'Activos', 'Inactivos'
     
     Returns:
-        Lista de diccionarios con información de constructores ordenados por score promedio
+        Lista de diccionarios con información de vendedores ordenados por score promedio
     """
     try:
         if df.empty:
             return []
         
-        # Buscar columna de constructor
-        col_constructor = None
-        # Primero buscar 'Constructor' exacto
-        if 'Constructor' in df.columns:
-            col_constructor = 'Constructor'
+        # Buscar columna de vendedor (Vende)
+        col_vende = None
+        # Primero buscar 'Vende' exacto
+        if 'Vende' in df.columns:
+            col_vende = 'Vende'
         else:
-            # Buscar cualquier columna que contenga 'constructor' o 'constructora'
+            # Buscar cualquier columna que contenga 'vende'
             for col in df.columns:
-                if 'constructor' in col.lower() or 'constructora' in col.lower():
-                    col_constructor = col
+                if col.lower() == 'vende' or 'vende' in col.lower():
+                    col_vende = col
                     break
         
-        if not col_constructor:
-            print("⚠ No se encontró columna de constructor en el dataset")
+        if not col_vende:
+            print("⚠ No se encontró columna 'Vende' en el dataset")
+            print(f"  Columnas disponibles: {list(df.columns)[:30]}...")
             return []
+        
+        print(f"  ✓ Usando columna '{col_vende}' para ranking de vendedores")
         
         # Filtrar por estado (activo/inactivo)
         df_filtrado = df.copy()
@@ -1035,41 +1136,35 @@ def calcular_ranking_constructores(df, estado_filtro='Todos'):
             if 'Unidades_Disponibles' in df_filtrado.columns:
                 df_filtrado = df_filtrado[df_filtrado['Unidades_Disponibles'] == 0]
         
-        # Agrupar por constructor
-        constructores_stats = []
+        # Agrupar por vendedor (Vende)
+        vendedores_stats = []
         
-        for constructor, grupo in df_filtrado.groupby(col_constructor):
-            if pd.isna(constructor) or str(constructor).strip() == '' or str(constructor).lower() == 'nan':
+        # Filtrar valores nulos antes de agrupar
+        df_filtrado = df_filtrado[df_filtrado[col_vende].notna()]
+        df_filtrado = df_filtrado[df_filtrado[col_vende].astype(str).str.strip() != '']
+        df_filtrado = df_filtrado[~df_filtrado[col_vende].astype(str).str.lower().isin(['nan', 'none', 'n/a', ''])]
+        
+        if df_filtrado.empty:
+            print("  ⚠ No hay vendedores válidos después de filtrar")
+            return []
+        
+        print(f"  ✓ Proyectos con vendedor válido: {len(df_filtrado)}")
+        
+        for vendedor, grupo in df_filtrado.groupby(col_vende):
+            if pd.isna(vendedor) or str(vendedor).strip() == '' or str(vendedor).lower() == 'nan':
                 continue
             
-            # Limpiar nombre del constructor
-            constructor_nombre = str(constructor).strip()
+            # Limpiar nombre del vendedor
+            vendedor_nombre = str(vendedor).strip()
             
             # Eliminar ".0" si es un número flotante convertido a string
-            if constructor_nombre.endswith('.0') and constructor_nombre.replace('.0', '').replace('-', '').isdigit():
-                constructor_nombre = constructor_nombre.rstrip('.0')
+            if vendedor_nombre.endswith('.0') and vendedor_nombre.replace('.0', '').replace('-', '').isdigit():
+                vendedor_nombre = vendedor_nombre.rstrip('.0')
             
             # Si es un número puro (sin decimales), es probable que sea un código
-            # En este caso, buscar en el dataset enriquecido si hay otra columna con nombres
-            if constructor_nombre.replace('-', '').isdigit():
-                # Es un número/código, buscar columnas alternativas que puedan tener el nombre
-                primer_proyecto = grupo.iloc[0]
-                
-                # Buscar columnas que contengan "constructor" o "constructora" pero no sean la misma
-                for col in df_filtrado.columns:
-                    if col != col_constructor and ('constructor' in col.lower() or 'constructora' in col.lower()):
-                        valor = primer_proyecto.get(col)
-                        if pd.notna(valor):
-                            valor_str = str(valor).strip()
-                            # Si el valor no es numérico, usarlo como nombre
-                            if valor_str and not valor_str.replace('.', '').replace('-', '').isdigit():
-                                constructor_nombre = valor_str
-                                break
-                
-                # Si aún es un número después de buscar, formatearlo como "Constructor #XXXX"
-                if constructor_nombre.replace('-', '').isdigit():
-                    # Mantener el número pero formateado mejor
-                    constructor_nombre = f"Constructor #{constructor_nombre}"
+            if vendedor_nombre.replace('-', '').isdigit():
+                # Si aún es un número después de buscar, formatearlo como "Vendedor #XXXX"
+                vendedor_nombre = f"Vendedor #{vendedor_nombre}"
             
             total_proyectos = len(grupo)
             
@@ -1087,8 +1182,8 @@ def calcular_ranking_constructores(df, estado_filtro='Todos'):
             # Calcular score compuesto para ranking (ponderado: 60% score promedio, 40% % exitosos)
             score_ranking = (score_promedio * 0.6) + (porcentaje_exitosos / 100 * 0.4)
             
-            constructores_stats.append({
-                'constructor': constructor_nombre,
+            vendedores_stats.append({
+                'vendedor': vendedor_nombre,
                 'total_proyectos': total_proyectos,
                 'exitosos': exitosos,
                 'moderados': moderados,
@@ -1098,20 +1193,26 @@ def calcular_ranking_constructores(df, estado_filtro='Todos'):
                 'score_ranking': round(score_ranking, 3)
             })
         
-        # Ordenar por score_ranking (descendente) y tomar top 10
-        constructores_stats.sort(key=lambda x: x['score_ranking'], reverse=True)
+        # Ordenar por cantidad de proyectos exitosos (descendente) y tomar top 10
+        # Si hay empate, usar score_ranking como desempate
+        vendedores_stats.sort(key=lambda x: (x['exitosos'], x['score_ranking']), reverse=True)
         
-        return constructores_stats[:10]
+        top_10 = vendedores_stats[:10]
+        print(f"  ✓ Ranking generado: {len(top_10)} vendedores en top 10")
+        if len(top_10) > 0:
+            print(f"    - Mejor vendedor: {top_10[0]['vendedor']} ({top_10[0]['exitosos']} proyectos exitosos)")
+        
+        return top_10
         
     except Exception as e:
-        print(f"⚠ Error al calcular ranking de constructores: {str(e)}")
+        print(f"⚠ Error al calcular ranking de vendedores: {str(e)}")
         import traceback
         traceback.print_exc()
         return []
 
 @app.route('/api/ranking-constructores')
 def get_ranking_constructores():
-    """API para obtener el ranking de constructores."""
+    """API para obtener el ranking de vendedores (columna Vende)."""
     try:
         if df_data.empty:
             return jsonify({
@@ -1121,9 +1222,9 @@ def get_ranking_constructores():
             }), 200
         
         # Obtener filtro de estado
-        estado_filtro = request.args.get('estado', 'Todos')
+        estado_filtro = request.args.get('estado', 'Activos')
         
-        # Calcular ranking
+        # Calcular ranking (ahora usa columna Vende)
         ranking = calcular_ranking_constructores(df_data, estado_filtro)
         
         return jsonify({

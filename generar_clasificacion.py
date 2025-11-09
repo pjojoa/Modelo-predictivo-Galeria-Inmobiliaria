@@ -1865,8 +1865,12 @@ def determinar_patron_ventas(ds, cols):
 # ============================================================================
 
 def generar_archivo_final(proj_ds, cols_proy, key_pry):
-    """Genera el DataFrame final con el formato esperado.
-    GARANTIZA que todas las columnas tengan los tipos de datos correctos."""
+    """Genera el DataFrame final preservando TODAS las columnas originales más las calculadas.
+    GARANTIZA que todas las columnas tengan los tipos de datos correctos.
+    
+    IMPORTANTE: Esta función ahora preserva TODAS las columnas del proj_ds original,
+    no solo un subconjunto. Esto permite tener acceso completo a todos los datos
+    para segmentación y visualizaciones avanzadas."""
     print("=" * 70)
     print("  GENERANDO ARCHIVO FINAL")
     print("=" * 70)
@@ -1886,7 +1890,11 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
     print(f"  ✓ Primeras columnas: {list(proj_ds.columns[:10])}")
     print()
     
-    resultado = pd.DataFrame()
+    # IMPORTANTE: Empezar con una copia de proj_ds para preservar TODAS las columnas originales
+    # Esto incluye todas las columnas de Inmuebles, Proyectos, y las calculadas
+    resultado = proj_ds.copy()
+    print(f"  ✓ Copiadas todas las columnas originales: {len(resultado.columns)} columnas")
+    print()
     
     # Código y nombre del proyecto
     # Buscar columna de código de proyecto de forma flexible
@@ -1918,14 +1926,13 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
         print(f"  ⚠ No se encontró columna de código, usando índice")
         resultado['Codigo_Proyecto'] = proj_ds.index.astype(str)
     
-    # VALIDACIÓN: Verificar que se creó la primera columna correctamente
+    # VALIDACIÓN: Verificar que el resultado no esté vacío
     if len(resultado) == 0:
-        print("❌ ERROR: No se pudo crear la columna Codigo_Proyecto")
+        print("❌ ERROR: El resultado está vacío")
         print(f"  Tamaño de proj_ds: {len(proj_ds)}")
-        print(f"  key_para_codigo: {key_para_codigo}")
         return pd.DataFrame()
     
-    print(f"  ✓ Primera columna creada: Codigo_Proyecto ({len(resultado)} filas)")
+    print(f"  ✓ DataFrame inicial creado con {len(resultado)} filas y {len(resultado.columns)} columnas")
     
     if cols_proy.get('nombre') and cols_proy['nombre'] in proj_ds.columns:
         print(f"  ✓ Usando columna de nombre: {cols_proy['nombre']}")
@@ -2106,6 +2113,94 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
     else:
         resultado['Tipo_VIS_Principal'] = 'N/A'
     
+    # Vende - Buscar y agregar columna Vende si existe en el dataset original
+    col_vende = None
+    # Primero buscar 'Vende' exacto
+    if 'Vende' in proj_ds.columns:
+        col_vende = 'Vende'
+    else:
+        # Buscar cualquier columna que contenga 'vende'
+        for c in proj_ds.columns:
+            if c.lower() == 'vende' or 'vende' in c.lower():
+                col_vende = c
+                break
+    
+    if col_vende and col_vende in proj_ds.columns:
+        # Si la columna ya existe en resultado (porque copiamos todo), solo asegurar formato
+        if 'Vende' not in resultado.columns or col_vende != 'Vende':
+            # Si existe con otro nombre, renombrarla a 'Vende' si no existe ya
+            if col_vende != 'Vende' and 'Vende' not in resultado.columns:
+                resultado['Vende'] = proj_ds[col_vende].astype(str).fillna('N/A')
+                resultado['Vende'] = resultado['Vende'].replace(['nan', 'None', 'none', ''], 'N/A')
+            elif col_vende == 'Vende':
+                # Ya existe con el nombre correcto, solo limpiar
+                resultado['Vende'] = resultado['Vende'].astype(str).fillna('N/A')
+                resultado['Vende'] = resultado['Vende'].replace(['nan', 'None', 'none', ''], 'N/A')
+    else:
+        # Si no existe, crear columna vacía
+        if 'Vende' not in resultado.columns:
+            resultado['Vende'] = 'N/A'
+    
+    # Validación: Eliminar columnas duplicadas (mismo contenido, diferente nombre)
+    print("  Validando columnas duplicadas...")
+    columnas_duplicadas = set()
+    columnas_procesadas = set()
+    
+    # Columnas estándar que NO deben eliminarse (prioridad)
+    columnas_protegidas = {'Vende', 'Constructor', 'Codigo_Proyecto', 'Proyecto', 'Clasificacion', 
+                           'Score_Exito', 'Zona', 'Barrio', 'Precio_Promedio', 'Area_Promedio'}
+    
+    # Comparar columnas por pares (más eficiente)
+    columnas_list = list(resultado.columns)
+    for i, col1 in enumerate(columnas_list):
+        if col1 in columnas_duplicadas or col1 in columnas_procesadas:
+            continue
+        
+        for col2 in columnas_list[i+1:]:
+            if col2 in columnas_duplicadas or col2 in columnas_procesadas:
+                continue
+            
+            # Normalizar nombres para comparación
+            col1_norm = col1.lower().strip().replace(' ', '_').replace('-', '_')
+            col2_norm = col2.lower().strip().replace(' ', '_').replace('-', '_')
+            
+            # Si los nombres son idénticos normalizados, verificar contenido
+            if col1_norm == col2_norm:
+                try:
+                    # Comparar contenido (muestra de primeros 100 valores para eficiencia)
+                    muestra1 = resultado[col1].head(100)
+                    muestra2 = resultado[col2].head(100)
+                    
+                    if muestra1.equals(muestra2):
+                        # Verificar si son realmente iguales en todo el dataset
+                        if len(resultado) <= 1000 or resultado[col1].equals(resultado[col2]):
+                            # Decidir cuál mantener
+                            if col1 in columnas_protegidas:
+                                columnas_duplicadas.add(col2)
+                                print(f"    ⚠ Columna duplicada: '{col2}' (duplica '{col1}')")
+                            elif col2 in columnas_protegidas:
+                                columnas_duplicadas.add(col1)
+                                print(f"    ⚠ Columna duplicada: '{col1}' (duplica '{col2}')")
+                            elif len(col1) <= len(col2):
+                                columnas_duplicadas.add(col2)
+                                print(f"    ⚠ Columna duplicada: '{col2}' (duplica '{col1}')")
+                            else:
+                                columnas_duplicadas.add(col1)
+                                print(f"    ⚠ Columna duplicada: '{col1}' (duplica '{col2}')")
+                except Exception as e:
+                    # Si hay error al comparar, continuar
+                    pass
+        
+        columnas_procesadas.add(col1)
+    
+    # Eliminar columnas duplicadas
+    if columnas_duplicadas:
+        resultado = resultado.drop(columns=list(columnas_duplicadas), errors='ignore')
+        print(f"  ✓ Eliminadas {len(columnas_duplicadas)} columnas duplicadas")
+    else:
+        print("  ✓ No se encontraron columnas duplicadas")
+    print()
+    
     # Validación final: asegurar que todas las columnas tengan tipos correctos
     # Clasificacion
     mask_invalida = ~resultado['Clasificacion'].isin(['Exitoso', 'Moderado', 'Mejorable'])
@@ -2135,14 +2230,15 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
         if col in resultado.columns:
             resultado[col] = pd.to_numeric(resultado[col], errors='coerce').fillna(0).clip(lower=0).astype(int)
     
-    # Asegurar tipos string correctos
-    columnas_string = ['Codigo_Proyecto', 'Proyecto', 'Clasificacion', 'Zona', 'Barrio', 
-                       'Patron_Ventas', 'Coordenadas Reales', 'Tipo_VIS_Principal', 'Clasificacion_Compuesta', 'Constructor']
-    for col in columnas_string:
+    # Asegurar tipos string correctos SOLO para las columnas que agregamos/sobrescribimos
+    # Las demás columnas mantienen su tipo original
+    columnas_string_especiales = ['Codigo_Proyecto', 'Proyecto', 'Clasificacion', 'Zona', 'Barrio', 
+                       'Patron_Ventas', 'Coordenadas Reales', 'Tipo_VIS_Principal', 'Clasificacion_Compuesta', 'Constructor', 'Vende']
+    for col in columnas_string_especiales:
         if col in resultado.columns:
             resultado[col] = resultado[col].astype(str)
             # Rellenar valores vacíos según la columna
-            if col in ['Zona', 'Barrio', 'Tipo_VIS_Principal', 'Constructor']:
+            if col in ['Zona', 'Barrio', 'Tipo_VIS_Principal', 'Constructor', 'Vende']:
                 resultado[col] = resultado[col].replace(['', 'nan', 'None'], 'N/A')
             elif col == 'Patron_Ventas':
                 resultado[col] = resultado[col].replace(['', 'nan', 'None'], 'Sin datos')
@@ -2152,6 +2248,9 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
                 # Asegurar que solo haya valores válidos
                 mask_invalida = ~resultado[col].isin(['Exitoso', 'Moderado', 'Mejorable'])
                 resultado.loc[mask_invalida, col] = 'Moderado'
+    
+    # NOTA: Las demás columnas del resultado mantienen sus tipos y valores originales
+    # Esto incluye todas las columnas de Inmuebles, Proyectos, y las calculadas durante el proceso
     
     # VALIDACIÓN FINAL: Verificar que el resultado no esté vacío
     if resultado.empty:
@@ -2168,7 +2267,12 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
     
     # Mostrar resumen de columnas generadas
     print(f"[OK] Archivo final generado: {len(resultado)} proyectos")
-    print(f"  Columnas ({len(resultado.columns)}): {list(resultado.columns)}")
+    print(f"  Total de columnas: {len(resultado.columns)} (TODAS las columnas originales + calculadas)")
+    print(f"  Columnas principales agregadas/sobrescritas: Codigo_Proyecto, Proyecto, Clasificacion, Score_Exito, etc.")
+    print(f"  Columnas originales preservadas: {len(resultado.columns) - len(columnas_string_especiales)} columnas")
+    print(f"  Primeras 20 columnas: {list(resultado.columns[:20])}")
+    if len(resultado.columns) > 20:
+        print(f"  ... y {len(resultado.columns) - 20} columnas más")
     print()
     print(f"  Validación de datos:")
     print(f"    - Total de proyectos: {len(resultado)}")
@@ -2600,48 +2704,103 @@ def analizar_caracteristicas_exitosos(ds, cols_proy):
                     'mediana': float(percentil_valido.median())
                 }
         
-        # 15. Características de inmuebles: Alcobas, Baños, Garajes
-        # Alcobas promedio
+        # 15. Características de inmuebles: Alcobas, Baños, Garajes (ANÁLISIS DETALLADO)
+        # Alcobas - Análisis completo con distribución
         for col in exitosos.columns:
             if 'alcoba' in col.lower() and ('median' in col.lower() or 'mean' in col.lower()):
                 alcobas = pd.to_numeric(exitosos[col], errors='coerce')
                 alcobas_valido = alcobas[alcobas > 0]
                 if len(alcobas_valido) > 0:
+                    # Calcular distribución de alcobas
+                    distribucion_alcobas = alcobas_valido.value_counts().sort_index()
                     caracteristicas['alcobas_promedio'] = {
                         'promedio': float(alcobas_valido.mean()),
                         'mediana': float(alcobas_valido.median()),
+                        'moda': float(distribucion_alcobas.index[0]) if len(distribucion_alcobas) > 0 else None,
                         'min': float(alcobas_valido.min()),
-                        'max': float(alcobas_valido.max())
+                        'max': float(alcobas_valido.max()),
+                        'distribucion': {int(k): int(v) for k, v in distribucion_alcobas.head(5).to_dict().items()},
+                        'rango_mas_comun': f"{int(distribucion_alcobas.index[0])} alcobas" if len(distribucion_alcobas) > 0 else None
                     }
                 break
         
-        # Baños promedio
+        # Baños - Análisis completo con distribución
         for col in exitosos.columns:
             if ('bano' in col.lower() or 'baño' in col.lower()) and ('median' in col.lower() or 'mean' in col.lower()):
                 banos = pd.to_numeric(exitosos[col], errors='coerce')
                 banos_valido = banos[banos > 0]
                 if len(banos_valido) > 0:
+                    # Calcular distribución de baños
+                    distribucion_banos = banos_valido.value_counts().sort_index()
                     caracteristicas['banos_promedio'] = {
                         'promedio': float(banos_valido.mean()),
                         'mediana': float(banos_valido.median()),
+                        'moda': float(distribucion_banos.index[0]) if len(distribucion_banos) > 0 else None,
                         'min': float(banos_valido.min()),
-                        'max': float(banos_valido.max())
+                        'max': float(banos_valido.max()),
+                        'distribucion': {int(k): int(v) for k, v in distribucion_banos.head(5).to_dict().items()},
+                        'rango_mas_comun': f"{int(distribucion_banos.index[0])} baños" if len(distribucion_banos) > 0 else None
                     }
                 break
         
-        # Garajes promedio
+        # Garajes - Análisis completo con distribución
         for col in exitosos.columns:
             if 'garaje' in col.lower() and ('median' in col.lower() or 'mean' in col.lower()):
                 garajes = pd.to_numeric(exitosos[col], errors='coerce')
                 garajes_valido = garajes[garajes >= 0]
                 if len(garajes_valido) > 0:
+                    # Calcular distribución de garajes
+                    distribucion_garajes = garajes_valido.value_counts().sort_index()
                     caracteristicas['garajes_promedio'] = {
                         'promedio': float(garajes_valido.mean()),
                         'mediana': float(garajes_valido.median()),
+                        'moda': float(distribucion_garajes.index[0]) if len(distribucion_garajes) > 0 else None,
                         'min': float(garajes_valido.min()),
-                        'max': float(garajes_valido.max())
+                        'max': float(garajes_valido.max()),
+                        'distribucion': {int(k): int(v) for k, v in distribucion_garajes.head(5).to_dict().items()},
+                        'rango_mas_comun': f"{int(distribucion_garajes.index[0])} garajes" if len(distribucion_garajes) > 0 else None
                     }
                 break
+        
+        # 15.1. Distribución de inmuebles (combinación Alcobas-Baños)
+        # Buscar columnas que puedan tener información de distribución
+        distribuciones_encontradas = {}
+        for col in exitosos.columns:
+            col_lower = col.lower()
+            # Buscar columnas relacionadas con distribución, tipo, acabados, materiales
+            if any(term in col_lower for term in ['distribucion', 'tipo', 'acabado', 'material', 'estado', 'condicion']):
+                if exitosos[col].dtype == 'object' or exitosos[col].dtype.name == 'string':
+                    valores_unicos = exitosos[col].value_counts().head(10)
+                    if len(valores_unicos) > 0:
+                        distribuciones_encontradas[col] = {
+                            'mas_comun': str(valores_unicos.index[0]) if len(valores_unicos) > 0 else None,
+                            'distribucion': {str(k): int(v) for k, v in valores_unicos.to_dict().items()},
+                            'total_valores_unicos': len(exitosos[col].dropna().unique())
+                        }
+        
+        if distribuciones_encontradas:
+            caracteristicas['distribuciones_caracteristicas'] = distribuciones_encontradas
+            print(f"  ✓ Encontradas {len(distribuciones_encontradas)} columnas con información de distribución/características")
+        
+        # 15.2. Análisis de acabados y materiales (buscar en todas las columnas)
+        acabados_materiales = {}
+        for col in exitosos.columns:
+            col_lower = col.lower()
+            # Buscar columnas relacionadas con acabados o materiales
+            if any(term in col_lower for term in ['acabado', 'material', 'revestimiento', 'piso', 'techo', 'cocina', 'baño']):
+                if exitosos[col].dtype == 'object' or exitosos[col].dtype.name == 'string':
+                    valores = exitosos[col].dropna()
+                    if len(valores) > 0:
+                        valores_counts = valores.value_counts().head(10)
+                        acabados_materiales[col] = {
+                            'mas_comun': str(valores_counts.index[0]) if len(valores_counts) > 0 else None,
+                            'distribucion': {str(k): int(v) for k, v in valores_counts.to_dict().items()},
+                            'porcentaje_cobertura': float(len(valores) / len(exitosos) * 100)
+                        }
+        
+        if acabados_materiales:
+            caracteristicas['acabados_materiales'] = acabados_materiales
+            print(f"  ✓ Encontradas {len(acabados_materiales)} columnas con información de acabados/materiales")
         
         # 16. Análisis de amenidades (columna "Otros")
         col_otros = cols_proy.get('otros')

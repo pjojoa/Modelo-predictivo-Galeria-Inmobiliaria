@@ -70,23 +70,89 @@ body {
 /* Sidebar */
 .sidebar {
     width: 300px;
+    min-width: 200px;
+    max-width: 500px;
     background: var(--platzi-white);
     border-radius: 12px;
-    padding: 1.5rem;
+    padding: 0;
     box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     height: fit-content;
     position: sticky;
     top: 1rem;
+    transition: width 0.3s ease, transform 0.3s ease;
+    overflow: hidden;
+    z-index: 100;
+}
+
+.sidebar.collapsed {
+    width: 60px;
+    min-width: 60px;
+}
+
+.sidebar.collapsed .sidebar-content {
+    display: none;
+}
+
+.sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid #E8E8E8;
+    background: linear-gradient(135deg, var(--platzi-dark-blue) 0%, #1a4d7a 100%);
+    color: white;
+    position: relative;
 }
 
 .sidebar-header h2 {
-    color: var(--platzi-dark-blue);
+    color: white;
     font-size: 1.3rem;
-    font-weight: 700;
-    margin-bottom: 1.5rem;
+    margin: 0;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 0.5rem;
+    flex: 1;
+}
+
+.sidebar.collapsed .sidebar-header h2 {
+    display: none;
+}
+
+.sidebar-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.sidebar-toggle,
+.sidebar-resize {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+}
+
+.sidebar-toggle:hover,
+.sidebar-resize:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: scale(1.1);
+}
+
+.sidebar.collapsed .sidebar-toggle i {
+    transform: rotate(180deg);
+}
+
+.sidebar-content {
+    padding: 1.5rem;
+    transition: opacity 0.3s ease;
 }
 
 .filter-section {
@@ -119,17 +185,19 @@ body {
 
 .price-range {
     display: flex;
-    gap: 0.5rem;
-    align-items: center;
+    gap: 0.4rem;
+    align-items: flex-start;
     margin-bottom: 0.5rem;
+    flex-wrap: nowrap;
 }
 
 .price-input {
-    flex: 1;
-    padding: 0.75rem;
+    width: 100%;
+    padding: 0.6rem 0.5rem;
     border: 2px solid #E8E8E8;
-    border-radius: 8px;
-    font-size: 0.95rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    box-sizing: border-box;
 }
 
 .price-input:focus {
@@ -137,22 +205,84 @@ body {
     border-color: var(--platzi-green);
 }
 
+.price-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.price-label {
+    font-size: 0.75rem;
+    color: var(--platzi-text);
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
 .price-separator {
     color: var(--platzi-text);
     font-weight: 600;
+    align-self: center;
+    margin-top: 1.5rem;
+    padding: 0 0.3rem;
+    font-size: 0.9rem;
+    flex-shrink: 0;
 }
 
-.btn-apply {
-    width: 100%;
-    padding: 0.75rem;
-    background: var(--platzi-green);
-    color: var(--platzi-white);
+.price-range-info {
+    margin-top: 0.4rem;
+    margin-bottom: 0.4rem;
+    text-align: center;
+    padding: 0.3rem 0;
+}
+
+.price-info-text {
+    color: var(--platzi-text);
+    font-size: 0.75rem;
+    display: block;
+    line-height: 1.3;
+    word-wrap: break-word;
+}
+
+.price-buttons {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+
+.btn-clear {
+    flex: 1;
+    padding: 0.6rem 0.5rem;
+    background: #E8E8E8;
+    color: var(--platzi-text);
     border: none;
-    border-radius: 8px;
+    border-radius: 6px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.btn-clear:hover {
+    background: #D0D0D0;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.btn-apply {
+    flex: 1;
+    padding: 0.6rem 0.5rem;
+    background: var(--platzi-green);
+    color: var(--platzi-white);
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-size: 0.85rem;
+    white-space: nowrap;
 }
 
 .btn-apply:hover {
@@ -193,6 +323,46 @@ body {
 .stat-value {
     color: var(--platzi-dark-blue);
     font-weight: 700;
+    font-size: 1.1rem;
+}
+
+/* Acciones en sidebar */
+.sidebar-actions {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 2px solid #E8E8E8;
+}
+
+.btn-download {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(135deg, var(--platzi-dark-blue) 0%, var(--platzi-light-blue) 100%);
+    color: var(--platzi-white);
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(36, 56, 91, 0.2);
+}
+
+.btn-download:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(36, 56, 91, 0.3);
+    background: linear-gradient(135deg, var(--platzi-light-blue) 0%, var(--platzi-dark-blue) 100%);
+}
+
+.btn-download:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(36, 56, 91, 0.2);
+}
+
+.btn-download i {
     font-size: 1.1rem;
 }
 
@@ -670,6 +840,231 @@ body {
     border-radius: 8px;
     overflow: hidden;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    position: relative;
+}
+
+/* Toolbar de controles del mapa */
+.map-controls-toolbar {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    left: auto;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 8px;
+    padding: 0.75rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 180px;
+    max-width: 250px;
+    pointer-events: auto;
+}
+
+.map-control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.map-control-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--platzi-dark-blue);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.map-control-select {
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    background: white;
+    color: var(--platzi-text);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.map-control-select:hover {
+    border-color: var(--platzi-light-blue);
+}
+
+.map-control-select:focus {
+    outline: none;
+    border-color: var(--platzi-light-blue);
+    box-shadow: 0 0 0 3px rgba(45, 90, 160, 0.1);
+}
+
+.map-control-btn {
+    padding: 0.6rem 1rem;
+    background: var(--platzi-dark-blue);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.2s ease;
+}
+
+.map-control-btn:hover {
+    background: var(--platzi-light-blue);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.map-control-btn:active {
+    transform: translateY(0);
+}
+
+.map-control-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(45, 90, 160, 0.3);
+}
+
+.map-control-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--platzi-text);
+    user-select: none;
+}
+
+.map-control-checkbox {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.checkbox-custom {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.map-control-checkbox:checked + .checkbox-custom {
+    background: var(--platzi-dark-blue);
+    border-color: var(--platzi-dark-blue);
+}
+
+.map-control-checkbox:checked + .checkbox-custom::after {
+    content: '✓';
+    color: white;
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.map-control-checkbox:focus + .checkbox-custom {
+    box-shadow: 0 0 0 3px rgba(45, 90, 160, 0.2);
+}
+
+.checkbox-label {
+    flex: 1;
+}
+
+/* Leyenda del heatmap */
+.heatmap-legend {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    right: auto;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    min-width: 150px;
+}
+
+.heatmap-legend-header {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--platzi-dark-blue);
+    margin-bottom: 0.75rem;
+    text-align: center;
+}
+
+.heatmap-legend-gradient {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.heatmap-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.heatmap-legend-color {
+    width: 30px;
+    height: 20px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
+}
+
+.heatmap-legend-text {
+    font-size: 0.85rem;
+    color: var(--platzi-text);
+}
+
+.heatmap-legend-bar {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.heatmap-gradient-bar {
+    height: 12px;
+    width: 100%;
+    background: linear-gradient(90deg, #2c7bb6, #abd9e9, #ffffbf, #fdae61, #d7191c);
+    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* Responsive para móviles */
+@media (max-width: 768px) {
+    .map-controls-toolbar {
+        top: 5px;
+        right: 5px;
+        min-width: 160px;
+        max-width: 200px;
+        padding: 0.5rem;
+        font-size: 0.85rem;
+    }
+    
+    .map-control-btn {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.85rem;
+    }
+    
+    .heatmap-legend {
+        bottom: 5px;
+        left: 5px;
+        right: auto;
+        padding: 0.75rem;
+        min-width: 120px;
+    }
 }
 
 /* Panel de Constructores */
@@ -1044,16 +1439,20 @@ body {
     margin-bottom: 0;
 }
 
-.table-header {
+.table-header,
+.table-header-actions {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1.5rem;
     flex-wrap: wrap;
     gap: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #E8E8E8;
 }
 
-.table-header h3 {
+.table-header h3,
+.table-header-actions h3 {
     color: var(--platzi-dark-blue);
     font-size: 1.2rem;
     font-weight: 700;
@@ -1073,15 +1472,16 @@ body {
     background: var(--platzi-green);
     color: var(--platzi-white);
     border: none;
-    border-radius: 8px;
-    padding: 0.75rem 1.5rem;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s;
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.95rem;
+    gap: 6px;
+    font-size: 0.85rem;
+    white-space: nowrap;
 }
 
 .btn-download:hover {

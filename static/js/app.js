@@ -9,6 +9,7 @@ let currentFilters = {
     zona: 'Todas',
     barrio: 'Todos',
     tipo_vis: 'Todos',
+    estado: 'Activos',  // Por defecto: Activos
     precio_min: null,
     precio_max: null
 };
@@ -17,15 +18,27 @@ let tableSort = {
     direction: 'asc' // 'asc' o 'desc'
 };
 
+// Variables globales para controles del mapa
+let currentBaseLayer = null;
+let baseLayers = {};
+let heatmapLayer = null;
+let clustersEnabled = true;
+let heatmapEnabled = false;
+let markersEnabled = true; // Por defecto los marcadores están visibles
+let heatmapDebounceTimer = null;
+
 // Inicialización
 document.addEventListener('DOMContentLoaded', function() {
     initMap();
     loadFiltros();
     loadProyectos();
     loadCaracteristicasExitosos();
-    loadRankingConstructores('Todos');
+    loadRankingConstructores('Activos');
     setupEventListeners();
     setupTabs();
+    setupSidebarControls();
+    setupMapControls();
+    loadMapStateFromURL();
 });
 
 // Configurar sistema de pestañas
@@ -49,7 +62,7 @@ function setupTabs() {
 }
 
 // Cargar ranking de constructores
-async function loadRankingConstructores(estado = 'Todos') {
+async function loadRankingConstructores(estado = 'Activos') {
     try {
         const response = await fetch(`/api/ranking-constructores?estado=${estado}`);
         if (!response.ok) {
@@ -95,14 +108,14 @@ function mostrarRankingConstructores(ranking) {
         else if (rank === 2) icon = 'fas fa-medal';
         else if (rank === 3) icon = 'fas fa-award';
         
-        const constructorNombre = escapeHtml(constructor.constructor || 'Constructor Sin Nombre');
+        const vendedorNombre = escapeHtml(constructor.vendedor || 'Vendedor Sin Nombre');
         html += `
             <div class="constructor-item ${isTop3 ? 'top-3' : ''}" style="animation-delay: ${delay}s">
                 <div class="constructor-header">
                     <div class="constructor-rank">${rank}</div>
-                    <div class="constructor-name" title="${constructorNombre}">
+                    <div class="constructor-name" title="${vendedorNombre}">
                         <i class="${icon}"></i>
-                        <span>${constructorNombre}</span>
+                        <span>${vendedorNombre}</span>
                     </div>
                 </div>
                 
@@ -159,27 +172,33 @@ function initMap() {
         zoomControl: true
     });
 
-    // Capas base (reutilizar instancias)
-    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 19
-    });
-    
-    const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Esri',
-        maxZoom: 19
-    });
-
-    // Agregar capa satelital por defecto (siempre satelital)
-    satelliteLayer.addTo(map);
-
-    // Control de capas (opcional, pero mantenemos para poder cambiar si es necesario)
-    const baseMaps = {
-        "Satélite": satelliteLayer,
-        "Mapa": osmLayer
+    // Crear todas las capas base
+    baseLayers = {
+        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Esri',
+            maxZoom: 19
+        }),
+        streets: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+        }),
+        terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenTopoMap contributors',
+            maxZoom: 17
+        }),
+        light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap contributors © CARTO',
+            maxZoom: 19
+        }),
+        dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap contributors © CARTO',
+            maxZoom: 19
+        })
     };
 
-    L.control.layers(baseMaps).addTo(map);
+    // Agregar capa satelital por defecto
+    currentBaseLayer = baseLayers.satellite;
+    currentBaseLayer.addTo(map);
 
     // Inicializar cluster de marcadores - usar comportamiento nativo de Leaflet
     // Solo personalizar los iconos para tamaños dinámicos
@@ -286,9 +305,42 @@ async function loadFiltros() {
             // Establecer valores de precio
             document.getElementById('precio_min').placeholder = `Mín: ${formatNumber(data.precio_min)}`;
             document.getElementById('precio_max').placeholder = `Máx: ${formatNumber(data.precio_max)}`;
+            
+            // Guardar rango de precio para mostrar información
+            window.priceRange = {
+                min: data.precio_min,
+                max: data.precio_max
+            };
+            
+            updatePriceRangeInfo();
         }
     } catch (error) {
         console.error('Error al cargar filtros:', error);
+    }
+}
+
+// Actualizar información del rango de precio
+function updatePriceRangeInfo() {
+    const infoElement = document.getElementById('precio_range_info');
+    if (!infoElement) return;
+    
+    const precioMin = document.getElementById('precio_min').value;
+    const precioMax = document.getElementById('precio_max').value;
+    
+    if (precioMin || precioMax) {
+        const min = precioMin ? formatNumber(parseFloat(precioMin)) : 'Mín';
+        const max = precioMax ? formatNumber(parseFloat(precioMax)) : 'Máx';
+        infoElement.textContent = `Filtro: ${min} - ${max} COP`;
+        infoElement.style.color = 'var(--platzi-dark-blue)';
+        infoElement.style.fontWeight = '600';
+    } else {
+        if (window.priceRange) {
+            infoElement.textContent = `Rango disponible: ${formatNumber(window.priceRange.min)} - ${formatNumber(window.priceRange.max)} COP`;
+        } else {
+            infoElement.textContent = 'Rango completo disponible';
+        }
+        infoElement.style.color = 'var(--platzi-text)';
+        infoElement.style.fontWeight = '400';
     }
 }
 
@@ -777,11 +829,21 @@ async function loadProyectos() {
 // Actualizar mapa (optimizado)
 function updateMap() {
     // Limpiar marcadores existentes
-    markerCluster.clearLayers();
+    if (clustersEnabled && markerCluster) {
+        markerCluster.clearLayers();
+    } else {
+        markers.forEach(marker => {
+            map.removeLayer(marker);
+        });
+    }
     markers = [];
 
     if (proyectosData.length === 0) {
         document.getElementById('map-count').textContent = '0';
+        // Remover heatmap si no hay datos
+        if (heatmapEnabled) {
+            removeHeatmap();
+        }
         return;
     }
 
@@ -794,17 +856,32 @@ function updateMap() {
         return marker;
     });
 
-    // Agregar todos los marcadores al cluster de una vez
-    markerCluster.addLayers(markerLayers);
     markers = markerLayers;
 
-    // Ajustar vista del mapa si hay proyectos
-    if (markers.length > 0) {
-        const group = new L.featureGroup(markers);
-        map.fitBounds(group.getBounds().pad(0.1));
+    // Agregar marcadores según el estado de clústeres y visibilidad
+    if (markersEnabled) {
+        if (clustersEnabled && markerCluster) {
+            markerCluster.addLayers(markerLayers);
+        } else {
+            markerLayers.forEach(marker => {
+                marker.addTo(map);
+            });
+        }
+    }
+    // Si markersEnabled es false, no agregar marcadores al mapa
+
+    // Actualizar heatmap con debounce si está activado
+    if (heatmapEnabled) {
+        clearTimeout(heatmapDebounceTimer);
+        heatmapDebounceTimer = setTimeout(() => {
+            createHeatmap();
+        }, 150);
+    } else {
+        // Si el heatmap está desactivado, asegurarse de que esté removido
+        removeHeatmap();
     }
 
-            // Actualizar contador
+    // Actualizar contador
     document.getElementById('map-count').textContent = proyectosData.length;
     
     // Actualizar contador en el tab
@@ -1005,7 +1082,7 @@ function renderTable() {
             <td><span class="clasificacion-badge clasificacion-${proyecto.clasificacion.toLowerCase()}">${escapeHtml(proyecto.clasificacion)}</span></td>
             <td>${escapeHtml(proyecto.barrio)}</td>
             <td>${escapeHtml(proyecto.zona)}</td>
-            <td>${escapeHtml(proyecto.constructor || 'N/A')}</td>
+            <td>${escapeHtml(proyecto.vende || 'N/A')}</td>
             <td class="number-cell">${escapeHtml(proyecto.precio_formateado)}</td>
             <td class="number-cell">${proyecto.area_promedio ? proyecto.area_promedio.toFixed(0) : 'N/A'}</td>
             <td class="number-cell">${proyecto.velocidad_ventas ? proyecto.velocidad_ventas.toFixed(1) : '0.0'}</td>
@@ -1171,7 +1248,21 @@ function setupEventListeners() {
         currentFilters.precio_min = precioMin && precioMin !== '' ? precioMin : null;
         currentFilters.precio_max = precioMax && precioMax !== '' ? precioMax : null;
         loadProyectos();
+        updatePriceRangeInfo();
     });
+    
+    // Botón limpiar precio
+    const btnLimpiarPrecio = document.getElementById('limpiar_precio');
+    if (btnLimpiarPrecio) {
+        btnLimpiarPrecio.addEventListener('click', function() {
+            document.getElementById('precio_min').value = '';
+            document.getElementById('precio_max').value = '';
+            currentFilters.precio_min = null;
+            currentFilters.precio_max = null;
+            loadProyectos();
+            updatePriceRangeInfo();
+        });
+    }
     
     // Permitir Enter en los campos de precio
     document.getElementById('precio_min').addEventListener('keypress', function(e) {
@@ -1197,9 +1288,13 @@ function setupEventListeners() {
     });
 
     // Botón de descarga
-    document.getElementById('btn-download').addEventListener('click', function() {
-        downloadCSV();
-    });
+    // Botón de descarga CSV
+    const btnDescargar = document.getElementById('btn-descargar-csv');
+    if (btnDescargar) {
+        btnDescargar.addEventListener('click', function() {
+            downloadCSV();
+        });
+    }
     
     // Event listeners para ordenamiento de tabla
     document.querySelectorAll('.sortable').forEach(th => {
@@ -1212,9 +1307,99 @@ function setupEventListeners() {
 
 // Descargar CSV (optimizado)
 function downloadCSV() {
-    const params = buildFilterParams();
-    const url = `/api/descargar?${params}`;
-    window.location.href = url;
+    try {
+        // Construir parámetros de filtros
+        const params = new URLSearchParams();
+        
+        // Agregar todos los filtros activos
+        if (currentFilters.clasificacion && currentFilters.clasificacion !== 'Todos') {
+            params.append('clasificacion', currentFilters.clasificacion);
+        }
+        if (currentFilters.zona && currentFilters.zona !== 'Todas') {
+            params.append('zona', currentFilters.zona);
+        }
+        if (currentFilters.barrio && currentFilters.barrio !== 'Todos') {
+            params.append('barrio', currentFilters.barrio);
+        }
+        if (currentFilters.tipo_vis && currentFilters.tipo_vis !== 'Todos') {
+            params.append('tipo_vis', currentFilters.tipo_vis);
+        }
+        if (currentFilters.estado && currentFilters.estado !== 'Todos') {
+            params.append('estado', currentFilters.estado);
+        }
+        if (currentFilters.precio_min && currentFilters.precio_min !== null && currentFilters.precio_min !== '') {
+            params.append('precio_min', currentFilters.precio_min);
+        }
+        if (currentFilters.precio_max && currentFilters.precio_max !== null && currentFilters.precio_max !== '') {
+            params.append('precio_max', currentFilters.precio_max);
+        }
+        
+        const url = `/api/descargar?${params.toString()}`;
+        window.location.href = url;
+    } catch (error) {
+        console.error('Error al descargar CSV:', error);
+        alert('Error al descargar el archivo CSV. Por favor, intenta nuevamente.');
+    }
+}
+
+// Configurar controles del sidebar (expandir/colapsar y cambiar ancho)
+function setupSidebarControls() {
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const sidebarResize = document.getElementById('sidebar-resize');
+    
+    if (!sidebar || !sidebarToggle || !sidebarResize) return;
+    
+    // Toggle colapsar/expandir
+    sidebarToggle.addEventListener('click', function() {
+        sidebar.classList.toggle('collapsed');
+        // Guardar estado en localStorage
+        localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+    });
+    
+    // Restaurar estado del sidebar
+    const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+    if (isCollapsed) {
+        sidebar.classList.add('collapsed');
+    }
+    
+    // Cambiar ancho del sidebar
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+    
+    sidebarResize.addEventListener('mousedown', function(e) {
+        if (sidebar.classList.contains('collapsed')) return;
+        isResizing = true;
+        startX = e.clientX;
+        startWidth = sidebar.offsetWidth;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', function(e) {
+        if (!isResizing) return;
+        const diff = e.clientX - startX;
+        const newWidth = Math.max(200, Math.min(500, startWidth + diff));
+        sidebar.style.width = newWidth + 'px';
+        // Guardar ancho en localStorage
+        localStorage.setItem('sidebarWidth', newWidth);
+    });
+    
+    document.addEventListener('mouseup', function() {
+        if (isResizing) {
+            isResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+    
+    // Restaurar ancho guardado
+    const savedWidth = localStorage.getItem('sidebarWidth');
+    if (savedWidth && !sidebar.classList.contains('collapsed')) {
+        sidebar.style.width = savedWidth + 'px';
+    }
 }
 
 // Utilidades
@@ -1228,4 +1413,511 @@ function showLoading() {
 
 function hideLoading() {
     document.getElementById('loading-overlay').classList.remove('show');
+}
+
+// ============================================================================
+// CONTROLES DEL MAPA
+// ============================================================================
+
+// Configurar controles del mapa
+function setupMapControls() {
+    const styleSelect = document.getElementById('map-style-select');
+    const centerBtn = document.getElementById('center-data-btn');
+    const clusterToggle = document.getElementById('cluster-toggle');
+    const heatmapToggle = document.getElementById('heatmap-toggle');
+    const markersToggle = document.getElementById('markers-toggle');
+    
+    if (!styleSelect || !centerBtn || !clusterToggle || !heatmapToggle || !markersToggle) {
+        console.warn('No se encontraron todos los controles del mapa');
+        return;
+    }
+    
+    // Cargar estado desde localStorage
+    const savedStyle = localStorage.getItem('mapStyle') || 'satellite';
+    const savedClusters = localStorage.getItem('mapClusters') !== 'false';
+    const savedHeatmap = localStorage.getItem('mapHeatmap') === 'true';
+    const savedMarkers = localStorage.getItem('mapMarkers') !== 'false';
+    
+    styleSelect.value = savedStyle;
+    clusterToggle.checked = savedClusters;
+    heatmapToggle.checked = savedHeatmap;
+    markersToggle.checked = savedMarkers;
+    
+    clustersEnabled = savedClusters;
+    heatmapEnabled = savedHeatmap;
+    markersEnabled = savedMarkers;
+    
+    // Aplicar estado inicial
+    setBaseStyle(savedStyle);
+    updateClusterToggle();
+    updateHeatmapToggle();
+    updateMarkersToggle();
+    
+    // Event listeners
+    styleSelect.addEventListener('change', function() {
+        setBaseStyle(this.value);
+        saveMapState();
+    });
+    
+    centerBtn.addEventListener('click', function() {
+        fitToData();
+    });
+    
+    clusterToggle.addEventListener('change', function() {
+        clustersEnabled = this.checked;
+        updateClusterToggle();
+        saveMapState();
+    });
+    
+    heatmapToggle.addEventListener('change', function() {
+        heatmapEnabled = this.checked;
+        updateHeatmapToggle();
+        saveMapState();
+    });
+    
+    markersToggle.addEventListener('change', function() {
+        markersEnabled = this.checked;
+        updateMarkersToggle();
+        saveMapState();
+    });
+    
+    // Navegación con teclado
+    styleSelect.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            this.click();
+        }
+    });
+    
+    centerBtn.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            fitToData();
+        }
+    });
+}
+
+// Cambiar estilo base del mapa
+function setBaseStyle(style) {
+    if (!baseLayers[style]) {
+        console.warn(`Estilo de mapa no encontrado: ${style}`);
+        return;
+    }
+    
+    if (currentBaseLayer) {
+        map.removeLayer(currentBaseLayer);
+    }
+    
+    currentBaseLayer = baseLayers[style];
+    currentBaseLayer.addTo(map);
+    
+    // Actualizar select
+    const styleSelect = document.getElementById('map-style-select');
+    if (styleSelect) {
+        styleSelect.value = style;
+    }
+    
+    // Actualizar URL
+    updateURLParam('style', style);
+}
+
+// Centrar mapa en todos los proyectos
+function fitToData() {
+    if (!proyectosData || proyectosData.length === 0) {
+        console.warn('No hay proyectos para centrar');
+        return;
+    }
+    
+    // Filtrar proyectos con coordenadas válidas
+    const validProjects = proyectosData.filter(p => 
+        p.lat && p.lon && 
+        !isNaN(p.lat) && !isNaN(p.lon) &&
+        p.lat !== 0 && p.lon !== 0
+    );
+    
+    if (validProjects.length === 0) {
+        console.warn('No hay proyectos con coordenadas válidas');
+        return;
+    }
+    
+    // Calcular bounds
+    const bounds = L.latLngBounds(
+        validProjects.map(p => [p.lat, p.lon])
+    );
+    
+    // Ajustar vista con padding
+    map.fitBounds(bounds, {
+        padding: [50, 50],
+        maxZoom: 15
+    });
+}
+
+// Actualizar toggle de clústeres
+function updateClusterToggle() {
+    if (!markerCluster) return;
+    
+    // Si los marcadores están desactivados, no hacer nada
+    if (!markersEnabled) {
+        // Actualizar aria-checked
+        const clusterToggle = document.getElementById('cluster-toggle');
+        if (clusterToggle) {
+            clusterToggle.setAttribute('aria-checked', clustersEnabled);
+        }
+        return;
+    }
+    
+    if (clustersEnabled) {
+        // Activar clústeres: remover marcadores individuales del mapa y agregarlos al cluster
+        // Primero, remover todos los marcadores individuales del mapa
+        markers.forEach(marker => {
+            if (map.hasLayer(marker)) {
+                map.removeLayer(marker);
+            }
+        });
+        
+        // Limpiar el cluster y agregar todos los marcadores
+        markerCluster.clearLayers();
+        if (markers.length > 0) {
+            markerCluster.addLayers(markers);
+        }
+        
+        // Asegurarse de que el cluster esté en el mapa
+        if (!map.hasLayer(markerCluster)) {
+            map.addLayer(markerCluster);
+        }
+    } else {
+        // Desactivar clústeres: remover cluster y mostrar marcadores individuales
+        if (map.hasLayer(markerCluster)) {
+            map.removeLayer(markerCluster);
+        }
+        
+        // Agregar marcadores individuales al mapa
+        markers.forEach(marker => {
+            if (!map.hasLayer(marker)) {
+                marker.addTo(map);
+            }
+        });
+    }
+    
+    // Actualizar aria-checked
+    const clusterToggle = document.getElementById('cluster-toggle');
+    if (clusterToggle) {
+        clusterToggle.setAttribute('aria-checked', clustersEnabled);
+    }
+}
+
+// Actualizar toggle de mapa de calor
+function updateHeatmapToggle() {
+    if (heatmapEnabled) {
+        createHeatmap();
+        const legend = document.getElementById('heatmap-legend');
+        if (legend) {
+            legend.style.display = 'block';
+        }
+    } else {
+        removeHeatmap();
+        const legend = document.getElementById('heatmap-legend');
+        if (legend) {
+            legend.style.display = 'none';
+        }
+    }
+    
+    // Actualizar aria-checked
+    const heatmapToggle = document.getElementById('heatmap-toggle');
+    if (heatmapToggle) {
+        heatmapToggle.setAttribute('aria-checked', heatmapEnabled);
+    }
+}
+
+// Actualizar toggle de marcadores
+function updateMarkersToggle() {
+    if (markersEnabled) {
+        // Mostrar marcadores según el estado de clústeres
+        if (clustersEnabled && markerCluster) {
+            // Si los clústeres están activos, mostrar el cluster
+            if (!map.hasLayer(markerCluster)) {
+                markerCluster.clearLayers();
+                if (markers.length > 0) {
+                    markerCluster.addLayers(markers);
+                }
+                map.addLayer(markerCluster);
+            }
+        } else {
+            // Si los clústeres están desactivados, mostrar marcadores individuales
+            markers.forEach(marker => {
+                if (!map.hasLayer(marker)) {
+                    marker.addTo(map);
+                }
+            });
+        }
+    } else {
+        // Ocultar todos los marcadores
+        if (clustersEnabled && markerCluster && map.hasLayer(markerCluster)) {
+            map.removeLayer(markerCluster);
+        } else {
+            markers.forEach(marker => {
+                if (map.hasLayer(marker)) {
+                    map.removeLayer(marker);
+                }
+            });
+        }
+    }
+    
+    // Actualizar aria-checked
+    const markersToggle = document.getElementById('markers-toggle');
+    if (markersToggle) {
+        markersToggle.setAttribute('aria-checked', markersEnabled);
+    }
+}
+
+// Función para calcular percentil (estilo GIS)
+function percentile(values, p) {
+    if (!values.length) return NaN;
+    const sorted = [...values].sort((a, b) => a - b);
+    const index = (sorted.length - 1) * p;
+    const lo = Math.floor(index);
+    const hi = Math.ceil(index);
+    return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (index - lo);
+}
+
+// Normalizador de pesos robusto (estilo GIS)
+function weightNormalizer(items, getter) {
+    const vals = items.map(getter).filter(v => Number.isFinite(v));
+    if (vals.length === 0) return () => 0;
+    
+    const p05 = percentile(vals, 0.05);
+    const p95 = percentile(vals, 0.95);
+    
+    return (v) => {
+        if (!Number.isFinite(v) || p05 === p95) return 0;
+        return Math.max(0, Math.min(1, (v - p05) / (p95 - p05)));
+    };
+}
+
+// Crear mapa de calor (estilo GIS - más agresivo y visible)
+function createHeatmap() {
+    // Limpiar heatmap anterior si existe
+    removeHeatmap();
+    
+    if (!proyectosData || proyectosData.length === 0) {
+        console.log('No hay datos de proyectos para crear heatmap');
+        return;
+    }
+    
+    // Filtrar proyectos con coordenadas y precio válidos
+    const validProjects = proyectosData.filter(p => 
+        p.lat && p.lon && 
+        !isNaN(p.lat) && !isNaN(p.lon) &&
+        p.lat !== 0 && p.lon !== 0 &&
+        p.precio_promedio && 
+        p.precio_promedio > 0
+    );
+    
+    if (validProjects.length === 0) {
+        console.warn('No hay proyectos con coordenadas y precio válidos para el heatmap');
+        return;
+    }
+    
+    console.log(`Creando heatmap GIS con ${validProjects.length} proyectos válidos`);
+    
+    // Usar normalizador robusto estilo GIS
+    const normalize = weightNormalizer(validProjects, p => p.precio_promedio);
+    
+    // Obtener valores para la leyenda
+    const prices = validProjects.map(p => p.precio_promedio).sort((a, b) => a - b);
+    const p5 = percentile(prices, 0.05);
+    const p95 = percentile(prices, 0.95);
+    
+    console.log(`Rango de precios (P5-P95): ${p5.toLocaleString('es-CO')} - ${p95.toLocaleString('es-CO')} COP`);
+    
+    // Crear datos normalizados con intensidad mejorada
+    const normalizedData = validProjects.map(p => {
+        const weight = normalize(p.precio_promedio);
+        // Aumentar intensidad base para mejor visibilidad (mínimo 0.1 para puntos con peso bajo)
+        const intensity = Math.max(0.1, weight * 0.9 + 0.1);
+        return [p.lat, p.lon, intensity];
+    });
+    
+    console.log(`Datos normalizados: ${normalizedData.length} puntos`);
+    console.log(`Intensidad promedio: ${(normalizedData.reduce((sum, d) => sum + d[2], 0) / normalizedData.length).toFixed(3)}`);
+    
+    // Verificar si leaflet.heat está disponible
+    if (typeof L.heatLayer !== 'function' && typeof L.heat !== 'function') {
+        console.error('leaflet.heat no está disponible. Verificando carga de biblioteca...');
+        console.log('L.heatLayer:', typeof L.heatLayer);
+        console.log('L.heat:', typeof L.heat);
+        return;
+    }
+    
+    // Crear capa de calor con parámetros más agresivos (estilo GIS)
+    try {
+        const heatFunction = typeof L.heatLayer === 'function' ? L.heatLayer : L.heat;
+        
+        // Parámetros ajustados para mayor visibilidad y pigmentación
+        const currentZoom = map.getZoom();
+        const radius = Math.max(40, Math.min(80, 30 + currentZoom * 3)); // Radio adaptativo por zoom
+        const blur = Math.max(25, Math.min(50, 20 + currentZoom * 2)); // Blur adaptativo
+        
+        heatmapLayer = heatFunction(normalizedData, {
+            radius: radius,
+            blur: blur,
+            maxZoom: 18,
+            minOpacity: 0.4, // Opacidad mínima más alta para mejor visibilidad
+            max: 1.0,
+            // Gradiente estilo GIS: azul → cian → amarillo → naranja → rojo
+            gradient: {
+                0.0: '#2c7bb6',    // Azul (bajo)
+                0.25: '#abd9e9',   // Cian claro
+                0.5: '#ffffbf',    // Amarillo (medio)
+                0.75: '#fdae61',   // Naranja
+                1.0: '#d7191c'     // Rojo (alto)
+            }
+        });
+        
+        heatmapLayer.addTo(map);
+        console.log(`Heatmap GIS agregado: radius=${radius}, blur=${blur}`);
+        
+        // Actualizar leyenda
+        updateHeatmapLegend(p5, p95);
+        
+        // Actualizar heatmap cuando cambie el zoom para mantener visibilidad
+        map.off('zoomend', updateHeatmapOnZoom);
+        map.on('zoomend', updateHeatmapOnZoom);
+        
+    } catch (error) {
+        console.error('Error al crear heatmap:', error);
+    }
+}
+
+// Actualizar heatmap cuando cambia el zoom (mantener visibilidad)
+let zoomUpdateTimer = null;
+function updateHeatmapOnZoom() {
+    if (heatmapEnabled && heatmapLayer) {
+        // Debounce para evitar recrear demasiado rápido
+        clearTimeout(zoomUpdateTimer);
+        zoomUpdateTimer = setTimeout(() => {
+            // Recrear heatmap con nuevos parámetros de radio/blur según zoom
+            createHeatmap();
+        }, 300);
+    }
+}
+
+// Remover mapa de calor
+function removeHeatmap() {
+    if (heatmapLayer) {
+        map.removeLayer(heatmapLayer);
+        heatmapLayer = null;
+    }
+}
+
+// Actualizar leyenda del heatmap (estilo GIS)
+function updateHeatmapLegend(minPrice, maxPrice) {
+    const formatCurrency = (value) => {
+        return new Intl.NumberFormat('es-CO', {
+            style: 'currency',
+            currency: 'COP',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        }).format(value);
+    };
+    
+    const lowText = document.getElementById('heatmap-legend-low');
+    const mediumText = document.getElementById('heatmap-legend-medium');
+    const highText = document.getElementById('heatmap-legend-high');
+    
+    const midPrice = (minPrice + maxPrice) / 2;
+    
+    if (lowText) {
+        lowText.textContent = `Bajo: ${formatCurrency(minPrice)}`;
+    }
+    if (mediumText) {
+        mediumText.textContent = `Medio: ${formatCurrency(midPrice)}`;
+    }
+    if (highText) {
+        highText.textContent = `Alto: ${formatCurrency(maxPrice)}`;
+    }
+    
+    // Actualizar colores de la leyenda para que coincidan con el gradiente
+    const legendColors = document.querySelectorAll('.heatmap-legend-color');
+    if (legendColors.length >= 3) {
+        legendColors[0].style.background = '#2c7bb6'; // Azul (bajo)
+        legendColors[1].style.background = '#ffffbf'; // Amarillo (medio)
+        legendColors[2].style.background = '#d7191c'; // Rojo (alto)
+    }
+}
+
+// Guardar estado del mapa
+function saveMapState() {
+    const styleSelect = document.getElementById('map-style-select');
+    const clusterToggle = document.getElementById('cluster-toggle');
+    const heatmapToggle = document.getElementById('heatmap-toggle');
+    const markersToggle = document.getElementById('markers-toggle');
+    
+    if (styleSelect) {
+        localStorage.setItem('mapStyle', styleSelect.value);
+        updateURLParam('style', styleSelect.value);
+    }
+    if (clusterToggle) {
+        localStorage.setItem('mapClusters', clusterToggle.checked);
+        updateURLParam('cluster', clusterToggle.checked ? '1' : '0');
+    }
+    if (heatmapToggle) {
+        localStorage.setItem('mapHeatmap', heatmapToggle.checked);
+        updateURLParam('heat', heatmapToggle.checked ? '1' : '0');
+    }
+    if (markersToggle) {
+        localStorage.setItem('mapMarkers', markersToggle.checked);
+        updateURLParam('markers', markersToggle.checked ? '1' : '0');
+    }
+}
+
+// Cargar estado desde URL
+function loadMapStateFromURL() {
+    const params = new URLSearchParams(window.location.search);
+    const style = params.get('style');
+    const cluster = params.get('cluster');
+    const heat = params.get('heat');
+    const markers = params.get('markers');
+    
+    if (style && baseLayers[style]) {
+        setBaseStyle(style);
+        const styleSelect = document.getElementById('map-style-select');
+        if (styleSelect) {
+            styleSelect.value = style;
+        }
+    }
+    
+    if (cluster !== null) {
+        const clusterToggle = document.getElementById('cluster-toggle');
+        if (clusterToggle) {
+            clusterToggle.checked = cluster === '1';
+            clustersEnabled = cluster === '1';
+            updateClusterToggle();
+        }
+    }
+    
+    if (heat !== null) {
+        const heatmapToggle = document.getElementById('heatmap-toggle');
+        if (heatmapToggle) {
+            heatmapToggle.checked = heat === '1';
+            heatmapEnabled = heat === '1';
+            updateHeatmapToggle();
+        }
+    }
+    
+    if (markers !== null) {
+        const markersToggle = document.getElementById('markers-toggle');
+        if (markersToggle) {
+            markersToggle.checked = markers === '1';
+            markersEnabled = markers === '1';
+            updateMarkersToggle();
+        }
+    }
+}
+
+// Actualizar parámetro en URL
+function updateURLParam(key, value) {
+    const url = new URL(window.location);
+    url.searchParams.set(key, value);
+    window.history.replaceState({}, '', url);
 }
