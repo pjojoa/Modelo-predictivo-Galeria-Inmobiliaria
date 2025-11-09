@@ -1,8 +1,11 @@
 // Variables globales
 let map;
+// Exponer map globalmente para street-preview.js
+window.map = null; // Se asignará después de initMap()
 let markers = [];
 let markerCluster;
 let proyectosData = [];
+let proyectosDataOriginal = []; // Datos originales sin filtrar
 let proyectosDataSorted = []; // Datos ordenados para la tabla
 let currentFilters = {
     clasificacion: 'Todos',
@@ -26,6 +29,11 @@ let clustersEnabled = true;
 let heatmapEnabled = false;
 let markersEnabled = true; // Por defecto los marcadores están visibles
 let heatmapDebounceTimer = null;
+let markerColorCriterion = 'clasificacion'; // Criterio para colorear marcadores
+
+// Variables para filtrado de categorías (estilo Power BI - selección única)
+let selectedCategoryId = null; // ID de la categoría seleccionada (null si no hay selección)
+let allCategories = []; // Todas las categorías disponibles
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', function() {
@@ -39,7 +47,63 @@ document.addEventListener('DOMContentLoaded', function() {
     setupSidebarControls();
     setupMapControls();
     loadMapStateFromURL();
+    setupStreetPreview();
+    setupToolbarToggle();
+    setupMarkerLegendToggle();
+    setupCategoriesPanel();
 });
+
+// Configurar vista previa 360°
+function setupStreetPreview() {
+    const closeBtn = document.getElementById('street-preview-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function() {
+            if (window.streetPreview && window.streetPreview.closeStreetPreview) {
+                window.streetPreview.closeStreetPreview();
+            }
+        });
+        
+        // Navegación con teclado
+        closeBtn.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (window.streetPreview && window.streetPreview.closeStreetPreview) {
+                    window.streetPreview.closeStreetPreview();
+                }
+            }
+        });
+    }
+}
+
+// Configurar colapso/expansión del toolbar
+function setupToolbarToggle() {
+    const toolbar = document.getElementById('map-controls-toolbar');
+    const toggleBtn = document.getElementById('toolbar-toggle');
+    const toolbarContent = document.getElementById('toolbar-content');
+    
+    if (!toolbar || !toggleBtn || !toolbarContent) {
+        return;
+    }
+    
+    // Cargar estado guardado
+    const isCollapsed = localStorage.getItem('toolbarCollapsed') === 'true';
+    if (isCollapsed) {
+        toolbar.classList.add('collapsed');
+    }
+    
+    toggleBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        toolbar.classList.toggle('collapsed');
+        const collapsed = toolbar.classList.contains('collapsed');
+        localStorage.setItem('toolbarCollapsed', collapsed);
+        
+        // Actualizar icono
+        const icon = toggleBtn.querySelector('i');
+        if (icon) {
+            icon.style.transform = collapsed ? 'rotate(180deg)' : 'rotate(0deg)';
+        }
+    });
+}
 
 // Configurar sistema de pestañas
 function setupTabs() {
@@ -171,6 +235,8 @@ function initMap() {
         zoom: 11,
         zoomControl: true
     });
+    // Exponer map globalmente para street-preview.js
+    window.map = map;
 
     // Crear todas las capas base
     baseLayers = {
@@ -179,8 +245,8 @@ function initMap() {
             maxZoom: 19
         }),
         streets: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors',
-            maxZoom: 19
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
         }),
         terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenTopoMap contributors',
@@ -188,7 +254,7 @@ function initMap() {
         }),
         light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
             attribution: '© OpenStreetMap contributors © CARTO',
-            maxZoom: 19
+        maxZoom: 19
         }),
         dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             attribution: '© OpenStreetMap contributors © CARTO',
@@ -736,6 +802,7 @@ async function loadProyectos() {
         
         if (data.success) {
             proyectosData = data.proyectos || [];
+            proyectosDataOriginal = [...(data.proyectos || [])]; // Guardar copia original para filtros
             proyectosDataSorted = []; // Resetear ordenamiento al cargar nuevos datos
             tableSort.column = null;
             tableSort.direction = 'asc';
@@ -746,6 +813,7 @@ async function loadProyectos() {
             updateMap();
             updateTable();
             await updateStats(); // updateStats ya actualiza también las métricas
+            updateCategoryStatsPanel(); // Actualizar panel de estadísticas de categorías
             
             // Mostrar mensaje si no hay proyectos
             if (proyectosData.length === 0) {
@@ -786,6 +854,7 @@ async function loadProyectos() {
                     </div>`;
                     
                     proyectosData = [];
+                    proyectosDataOriginal = [];
                     proyectosDataSorted = [];
                     updateMap();
                     const tableBody = document.getElementById('table-body');
@@ -826,11 +895,16 @@ async function loadProyectos() {
     }
 }
 
-// Actualizar mapa (optimizado)
+// Actualizar mapa (optimizado) - con aislamiento de categorías seleccionadas
 function updateMap() {
+    console.log('[updateMap] Iniciando actualización del mapa');
+    console.log('[updateMap] markersEnabled:', markersEnabled);
+    console.log('[updateMap] proyectosData.length:', proyectosData.length);
+    console.log('[updateMap] proyectosDataOriginal.length:', proyectosDataOriginal.length);
+    
     // Limpiar marcadores existentes
     if (clustersEnabled && markerCluster) {
-        markerCluster.clearLayers();
+    markerCluster.clearLayers();
     } else {
         markers.forEach(marker => {
             map.removeLayer(marker);
@@ -838,7 +912,14 @@ function updateMap() {
     }
     markers = [];
 
-    if (proyectosData.length === 0) {
+    // Usar los datos filtrados (proyectosData ya contiene los datos filtrados si hay selección)
+    const dataToShow = proyectosData;
+
+    console.log('[updateMap] dataToShow.length:', dataToShow.length);
+    console.log('[updateMap] selectedCategoryId:', selectedCategoryId);
+
+    if (dataToShow.length === 0) {
+        console.warn('[updateMap] No hay datos para mostrar');
         document.getElementById('map-count').textContent = '0';
         // Remover heatmap si no hay datos
         if (heatmapEnabled) {
@@ -847,28 +928,176 @@ function updateMap() {
         return;
     }
 
-    // Crear marcadores en batch (más eficiente)
-    const markerLayers = proyectosData.map(proyecto => {
-        const marker = L.marker([proyecto.lat, proyecto.lon], {
-            icon: getIconForClasificacion(proyecto.clasificacion)
-        });
-        marker.bindPopup(createPopupContent(proyecto), { maxWidth: 300 });
-        return marker;
+    // Limpiar mapa de marcadores
+    projectMarkersMap.clear();
+    
+    // Filtrar proyectos con coordenadas válidas
+    const validProjects = dataToShow.filter(p => {
+        const lat = parseFloat(p.lat);
+        const lon = parseFloat(p.lon);
+        
+        // Validar que las coordenadas sean números válidos y no sean 0
+        const hasValidCoords = !isNaN(lat) && !isNaN(lon) && 
+            lat !== 0 && lon !== 0;
+        
+        // Validar rango de Cali/Colombia (más estricto)
+        // Cali: Lat ~3.42, Lon ~-76.53
+        // Rango razonable: Lat 3.0-4.5, Lon -77.5 a -76.0
+        const inRange = hasValidCoords && 
+            lat >= 3.0 && lat <= 4.5 &&
+            lon >= -77.5 && lon <= -76.0;
+        
+        // Si están fuera de rango pero en el rango invertido, intentar corregir
+        if (hasValidCoords && !inRange) {
+            // Verificar si están invertidas
+            if (lat >= -77.5 && lat <= -76.0 && lon >= 3.0 && lon <= 4.5) {
+                // Están invertidas, pero las corregiremos al crear el marcador
+                return true;
+            }
+        }
+        
+        return inRange;
     });
+    
+    console.log('[updateMap] Proyectos con coordenadas válidas:', validProjects.length);
+    
+    if (validProjects.length === 0) {
+        console.warn('[updateMap] No hay proyectos con coordenadas válidas');
+        document.getElementById('map-count').textContent = '0';
+        return;
+    }
+
+    // Crear marcadores en batch (más eficiente)
+    // Todos los marcadores se muestran con sus colores normales (como los filtros)
+    const markerLayers = validProjects.map(proyecto => {
+        // Obtener color del marcador
+        const color = getMarkerColor(proyecto);
+        
+        // Validar que el color sea válido
+        if (!color || color === '#95A5A6' || color === 'undefined' || color === 'null') {
+            console.warn(`[updateMap] Color inválido para proyecto ${proyecto.id || proyecto.nombre}: ${color}`);
+        }
+        
+        // Crear icono con color aplicado correctamente (sin opacidad, como los filtros normales)
+        const iconSize = 20;
+        const markerIcon = L.divIcon({
+            className: 'custom-marker',
+            html: `<div style="
+                background-color: ${color} !important; 
+                width: ${iconSize}px; 
+                height: ${iconSize}px; 
+                border-radius: 50%; 
+                border: 3px solid white; 
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3); 
+                transition: all 0.3s ease;
+                display: block;
+            "></div>`,
+            iconSize: [iconSize, iconSize],
+            iconAnchor: [iconSize / 2, iconSize / 2]
+        });
+        
+        // Obtener coordenadas y validar
+        let lat = parseFloat(proyecto.lat);
+        let lon = parseFloat(proyecto.lon);
+        
+        // Validar que las coordenadas sean válidas y estén en el rango de Cali/Colombia
+        // Cali: Lat ~3.42, Lon ~-76.53
+        // Rango razonable: Lat 3.0-4.5, Lon -77.5 a -76.0
+        const isValidCoord = !isNaN(lat) && !isNaN(lon) && 
+            lat !== 0 && lon !== 0 &&
+            lat >= 3.0 && lat <= 4.5 &&
+            lon >= -77.5 && lon <= -76.0;
+        
+        // Si las coordenadas están fuera de rango, pueden estar invertidas
+        // Intentar invertir si están en un rango que sugiere que están invertidas
+        if (!isValidCoord && !isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0) {
+            // Si lat está en rango de lon y lon está en rango de lat, están invertidas
+            if (lat >= -77.5 && lat <= -76.0 && lon >= 3.0 && lon <= 4.5) {
+                console.warn(`[updateMap] Coordenadas invertidas detectadas para proyecto ${proyecto.id || proyecto.nombre}, corrigiendo...`);
+                const temp = lat;
+                lat = lon;
+                lon = temp;
+            }
+        }
+        
+        // Validar nuevamente después de la corrección
+        if (isNaN(lat) || isNaN(lon) || lat === 0 || lon === 0) {
+            console.warn(`[updateMap] Coordenadas inválidas para proyecto ${proyecto.id || proyecto.nombre}: lat=${proyecto.lat}, lon=${proyecto.lon}`);
+            return null; // No crear marcador si las coordenadas son inválidas
+        }
+        
+        // Validar rango final
+        if (lat < 3.0 || lat > 4.5 || lon < -77.5 || lon > -76.0) {
+            console.warn(`[updateMap] Coordenadas fuera de rango para proyecto ${proyecto.id || proyecto.nombre}: lat=${lat}, lon=${lon}`);
+            // Aún así crear el marcador, pero registrar la advertencia
+        }
+        
+        const marker = L.marker([lat, lon], {
+            icon: markerIcon,
+            opacity: 1.0
+        });
+        
+        marker.bindPopup(createPopupContent(proyecto), { maxWidth: 300 });
+        
+        // Guardar marcador en el mapa para selección
+        if (proyecto.id) {
+            projectMarkersMap.set(proyecto.id, marker);
+        }
+        
+        // Agregar evento click para abrir Google Maps (opcional - se puede remover si no se desea)
+        // El popup ya tiene el botón, así que este evento es opcional
+        marker.on('click', function() {
+            // Comentado: si quieres que el click del marcador también abra Google Maps, descomenta:
+            // const url = `https://www.google.com/maps?q=${proyecto.lat},${proyecto.lon}`;
+            // window.open(url, '_blank', 'noopener,noreferrer');
+        });
+        
+        return marker;
+    }).filter(marker => marker !== null); // Filtrar marcadores nulos
 
     markers = markerLayers;
 
+    console.log('[updateMap] Marcadores válidos creados:', markerLayers.length);
+    console.log('[updateMap] markersEnabled:', markersEnabled);
+    console.log('[updateMap] clustersEnabled:', clustersEnabled);
+
+    // IMPORTANTE: Siempre agregar marcadores si están habilitados
+    // Si markersEnabled es false, forzar a true para mostrar marcadores
+    if (!markersEnabled) {
+        console.warn('[updateMap] markersEnabled está en false, forzando a true para mostrar marcadores');
+        markersEnabled = true;
+        const markersToggle = document.getElementById('markers-toggle');
+        if (markersToggle) {
+            markersToggle.checked = true;
+        }
+    }
+    
     // Agregar marcadores según el estado de clústeres y visibilidad
     if (markersEnabled) {
         if (clustersEnabled && markerCluster) {
-            markerCluster.addLayers(markerLayers);
+            // Limpiar cluster antes de agregar nuevos marcadores
+            markerCluster.clearLayers();
+            if (markerLayers.length > 0) {
+                markerCluster.addLayers(markerLayers);
+                console.log('[updateMap] Marcadores agregados al cluster:', markerLayers.length);
+            }
+            // Asegurarse de que el cluster esté en el mapa
+            if (!map.hasLayer(markerCluster)) {
+                map.addLayer(markerCluster);
+                console.log('[updateMap] Cluster agregado al mapa');
+            }
         } else {
+            // Agregar marcadores individuales
+            let addedCount = 0;
             markerLayers.forEach(marker => {
-                marker.addTo(map);
+                if (!map.hasLayer(marker)) {
+                    marker.addTo(map);
+                    addedCount++;
+                }
             });
+            console.log('[updateMap] Marcadores individuales agregados al mapa:', addedCount);
         }
     }
-    // Si markersEnabled es false, no agregar marcadores al mapa
 
     // Actualizar heatmap con debounce si está activado
     if (heatmapEnabled) {
@@ -881,30 +1110,203 @@ function updateMap() {
         removeHeatmap();
     }
 
-    // Actualizar contador
-    document.getElementById('map-count').textContent = proyectosData.length;
+    // Actualizar contador (mostrar total de proyectos filtrados)
+    const visibleCount = dataToShow.length;
+    
+    document.getElementById('map-count').textContent = visibleCount;
     
     // Actualizar contador en el tab
     const tableCountElement = document.getElementById('table-count');
     if (tableCountElement) {
-        tableCountElement.textContent = `(${proyectosData.length})`;
+        tableCountElement.textContent = `(${visibleCount})`;
     }
+    
+    // Actualizar leyenda de categorías
+    updateMarkerLegend();
 }
 
-// Crear icono según clasificación
-function getIconForClasificacion(clasificacion) {
+// Cache de colores generados para evitar repeticiones
+const colorCache = new Map();
+const usedHues = new Set();
+
+// Generar color consistente basado en un string (hash) - mejorado para evitar repeticiones
+function generateColorFromString(str) {
+    if (!str || str === 'N/A' || str === '') {
+        return '#95A5A6'; // Gris para valores nulos
+    }
+    
+    // Verificar cache
+    if (colorCache.has(str)) {
+        return colorCache.get(str);
+    }
+    
+    // Hash simple para generar un número consistente
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    
+    // Generar color HSL con mejor distribución
+    let hue = Math.abs(hash) % 360;
+    
+    // Evitar colores muy similares (diferencia mínima de 30 grados)
+    let attempts = 0;
+    while (usedHues.size > 0 && attempts < 50) {
+        let tooClose = false;
+        for (const usedHue of usedHues) {
+            const diff = Math.min(Math.abs(hue - usedHue), 360 - Math.abs(hue - usedHue));
+            if (diff < 30) {
+                tooClose = true;
+                break;
+            }
+        }
+        if (!tooClose) break;
+        hue = (hue + 30) % 360;
+        attempts++;
+    }
+    
+    // Añadir el hue usado (solo si no hay demasiados)
+    if (usedHues.size < 50) {
+        usedHues.add(hue);
+    }
+    
+    // Saturación y luminosidad más consistentes pero variadas
+    const saturation = 70 + (Math.abs(hash) % 15); // 70-85%
+    const lightness = 50 + (Math.abs(hash) % 10); // 50-60%
+    
+    // Convertir HSL a RGB y luego a hexadecimal para mejor compatibilidad
+    const hslToRgb = (h, s, l) => {
+        s /= 100;
+        l /= 100;
+        const k = n => (n + h / 30) % 12;
+        const a = s * Math.min(l, 1 - l);
+        const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+        return [Math.round(255 * f(0)), Math.round(255 * f(8)), Math.round(255 * f(4))];
+    };
+    
+    const [r, g, b] = hslToRgb(hue, saturation, lightness);
+    const color = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    
+    // Guardar en cache
+    colorCache.set(str, color);
+    
+    return color;
+}
+
+// Limpiar cache de colores (útil cuando cambia el criterio)
+function clearColorCache() {
+    colorCache.clear();
+    usedHues.clear();
+}
+
+// Obtener color para marcador según el criterio seleccionado
+function getMarkerColor(proyecto) {
+    if (!proyecto) {
+        console.warn('[getMarkerColor] Proyecto es null o undefined');
+        return '#95A5A6';
+    }
+    
+    let color = '#95A5A6'; // Color por defecto
+    
+    try {
+        switch (markerColorCriterion) {
+            case 'clasificacion':
     const colors = {
         'Exitoso': '#27AE60',
         'Moderado': '#F39C12',
         'Mejorable': '#E74C3C'
     };
-
-    // Normalizar clasificación
-    if (clasificacion) {
-        clasificacion = String(clasificacion).trim();
+                const clasificacion = String(proyecto.clasificacion || 'Moderado').trim();
+                color = colors[clasificacion] || colors['Moderado'] || '#F39C12';
+                break;
+                
+            case 'vende':
+                color = generateColorFromString(String(proyecto.vende || 'N/A'));
+                break;
+                
+            case 'año':
+                // Formatear año: si es 2000-2099, mostrar solo los últimos 2 dígitos para consistencia
+                let año_str = 'N/A';
+                if (proyecto.año) {
+                    const año_num = parseInt(proyecto.año);
+                    if (año_num >= 2000 && año_num < 2100) {
+                        // Mostrar solo los últimos 2 dígitos (00-99)
+                        año_str = String(año_num % 100).padStart(2, '0');
+                    } else {
+                        año_str = String(año_num);
+                    }
+                }
+                color = generateColorFromString(año_str);
+                break;
+                
+            case 'zona':
+                color = generateColorFromString(String(proyecto.zona || 'N/A'));
+                break;
+                
+            case 'barrio':
+                color = generateColorFromString(String(proyecto.barrio || 'N/A'));
+                break;
+                
+            default:
+                color = '#95A5A6';
+        }
+    } catch (error) {
+        console.error('[getMarkerColor] Error al obtener color:', error);
+        color = '#95A5A6';
     }
     
-    // Si no es una clasificación válida, usar 'Moderado' por defecto (naranja) en lugar de gris
+    // Validar que el color sea un string válido (hexadecimal o HSL)
+    if (!color || typeof color !== 'string' || (!color.startsWith('#') && !color.startsWith('hsl'))) {
+        console.warn(`[getMarkerColor] Color inválido generado: ${color}, usando color por defecto`);
+        color = '#95A5A6';
+    }
+    
+    // Si el color es HSL, convertirlo a hexadecimal
+    if (color.startsWith('hsl')) {
+        // Extraer valores HSL
+        const hslMatch = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+        if (hslMatch) {
+            const h = parseInt(hslMatch[1]);
+            const s = parseInt(hslMatch[2]);
+            const l = parseInt(hslMatch[3]);
+            
+            // Convertir HSL a RGB
+            const hslToRgb = (h, s, l) => {
+                s /= 100;
+                l /= 100;
+                const k = n => (n + h / 30) % 12;
+                const a = s * Math.min(l, 1 - l);
+                const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+                return [Math.round(255 * f(0)), Math.round(255 * f(8)), Math.round(255 * f(4))];
+            };
+            
+            const [r, g, b] = hslToRgb(h, s, l);
+            color = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+        }
+    }
+    
+    return color;
+}
+
+// Crear icono según el criterio de color seleccionado
+function getIconForClasificacion(clasificacion, proyecto = null) {
+    // Si se proporciona el proyecto completo, usar el nuevo sistema
+    if (proyecto) {
+        const color = getMarkerColor(proyecto);
+        return L.divIcon({
+            className: 'custom-marker',
+            html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+        });
+    }
+    
+    // Fallback al sistema antiguo si no se proporciona proyecto
+    const colors = {
+        'Exitoso': '#27AE60',
+        'Moderado': '#F39C12',
+        'Mejorable': '#E74C3C'
+    };
     const color = colors[clasificacion] || colors['Moderado'] || '#F39C12';
 
     return L.divIcon({
@@ -941,7 +1343,7 @@ function createPopupContent(proyecto) {
                 <strong>Estrato:</strong> ${escapeHtml(proyecto.estrato)}
             </div>
             <div class="popup-item">
-                <strong>Constructor:</strong> ${escapeHtml(proyecto.constructor || 'N/A')}
+                <strong>Vende:</strong> ${escapeHtml(proyecto.vende || 'N/A')}
             </div>
             <div class="popup-item">
                 <strong>Precio Promedio:</strong> ${escapeHtml(proyecto.precio_formateado)}
@@ -959,10 +1361,15 @@ function createPopupContent(proyecto) {
                 <strong>Unidades Disponibles:</strong> ${proyecto.unidades_disponibles}
             </div>
             <div class="popup-item">
-                <strong>Patrón Ventas:</strong> ${escapeHtml(proyecto.patron_ventas)}
+                <strong>Patrón Ventas:</strong> ${escapeHtml(proyecto.patron_ventas || 'N/A')}
             </div>
             <div class="popup-item">
                 <strong>Score Éxito:</strong> ${proyecto.score_exito.toFixed(2)}
+            </div>
+            <div class="popup-item" style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #eee;">
+                <button class="btn-view-360" onclick="(function(e) { e.stopPropagation(); e.preventDefault(); const url = 'https://www.google.com/maps?q=' + ${proyecto.lat} + ',' + ${proyecto.lon}; window.open(url, '_blank', 'noopener,noreferrer'); })(event); return false;" style="width: 100%; padding: 0.5rem; background: var(--platzi-dark-blue); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                    <i class="fas fa-street-view"></i> Ver en Google Maps
+                </button>
             </div>
         </div>
     `;
@@ -1159,22 +1566,61 @@ async function updateStats() {
         const data = await response.json();
         
         if (data.success) {
+            const total = data.total || 0;
+            const exitosos = data.exitosos || 0;
+            const moderados = data.moderados || 0;
+            const mejorables = data.mejorables || 0;
+            
             // Actualizar sidebar stats
-            document.getElementById('total-proyectos').textContent = data.total || 0;
-            document.getElementById('exitosos').textContent = data.exitosos || 0;
-            document.getElementById('moderados').textContent = data.moderados || 0;
-            document.getElementById('mejorables').textContent = data.mejorables || 0;
+            document.getElementById('total-proyectos').textContent = total;
+            document.getElementById('exitosos').textContent = exitosos;
+            document.getElementById('moderados').textContent = moderados;
+            document.getElementById('mejorables').textContent = mejorables;
             
             // Actualizar métricas principales
-            document.getElementById('metric-exitosos').textContent = data.exitosos || 0;
-            document.getElementById('metric-moderados').textContent = data.moderados || 0;
-            document.getElementById('metric-mejorables').textContent = data.mejorables || 0;
+            const metricExitosos = document.getElementById('metric-exitosos');
+            const metricModerados = document.getElementById('metric-moderados');
+            const metricMejorables = document.getElementById('metric-mejorables');
+            if (metricExitosos) metricExitosos.textContent = exitosos;
+            if (metricModerados) metricModerados.textContent = moderados;
+            if (metricMejorables) metricMejorables.textContent = mejorables;
             
             // Manejar score_promedio de forma segura
             const scorePromedio = data.score_promedio !== undefined && data.score_promedio !== null 
                 ? parseFloat(data.score_promedio) 
                 : 0.0;
-            document.getElementById('metric-score').textContent = scorePromedio.toFixed(2);
+            const metricScore = document.getElementById('metric-score');
+            if (metricScore) metricScore.textContent = scorePromedio.toFixed(2);
+            
+            // Actualizar gráfico de barras
+            if (total > 0) {
+                const exitososPct = (exitosos / total * 100).toFixed(1);
+                const moderadosPct = (moderados / total * 100).toFixed(1);
+                const mejorablesPct = (mejorables / total * 100).toFixed(1);
+                
+                const chartExitosos = document.getElementById('chart-exitosos');
+                const chartModerados = document.getElementById('chart-moderados');
+                const chartMejorables = document.getElementById('chart-mejorables');
+                const chartExitososValue = document.getElementById('chart-exitosos-value');
+                const chartModeradosValue = document.getElementById('chart-moderados-value');
+                const chartMejorablesValue = document.getElementById('chart-mejorables-value');
+                
+                if (chartExitosos) {
+                    chartExitosos.style.width = exitososPct + '%';
+                    if (chartExitososValue) chartExitososValue.textContent = exitososPct + '%';
+                }
+                if (chartModerados) {
+                    chartModerados.style.width = moderadosPct + '%';
+                    if (chartModeradosValue) chartModeradosValue.textContent = moderadosPct + '%';
+                }
+                if (chartMejorables) {
+                    chartMejorables.style.width = mejorablesPct + '%';
+                    if (chartMejorablesValue) chartMejorablesValue.textContent = mejorablesPct + '%';
+                }
+            }
+            
+            // Actualizar panel de estadísticas de categorías
+            updateCategoryStatsPanel();
         } else {
             // Si hay error, establecer valores por defecto
             document.getElementById('total-proyectos').textContent = '0';
@@ -1292,8 +1738,8 @@ function setupEventListeners() {
     const btnDescargar = document.getElementById('btn-descargar-csv');
     if (btnDescargar) {
         btnDescargar.addEventListener('click', function() {
-            downloadCSV();
-        });
+        downloadCSV();
+    });
     }
     
     // Event listeners para ordenamiento de tabla
@@ -1335,7 +1781,7 @@ function downloadCSV() {
         }
         
         const url = `/api/descargar?${params.toString()}`;
-        window.location.href = url;
+    window.location.href = url;
     } catch (error) {
         console.error('Error al descargar CSV:', error);
         alert('Error al descargar el archivo CSV. Por favor, intenta nuevamente.');
@@ -1400,6 +1846,241 @@ function setupSidebarControls() {
     if (savedWidth && !sidebar.classList.contains('collapsed')) {
         sidebar.style.width = savedWidth + 'px';
     }
+    
+    // Configurar pestañas del sidebar
+    setupSidebarTabs();
+}
+
+// Variables para selección de proyectos
+let selectedProjects = new Set();
+let projectMarkersMap = new Map(); // Mapa de ID de proyecto -> marker de Leaflet
+
+// Configurar pestañas del sidebar
+function setupSidebarTabs() {
+    const sidebarTabs = document.querySelectorAll('.sidebar-tab');
+    const tabPanes = document.querySelectorAll('.tab-pane');
+    
+    sidebarTabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+            const targetTab = this.getAttribute('data-tab');
+            
+            // Remover active de todas las pestañas y panes
+            sidebarTabs.forEach(t => t.classList.remove('active'));
+            tabPanes.forEach(p => p.classList.remove('active'));
+            
+            // Agregar active a la pestaña y pane seleccionados
+            this.classList.add('active');
+            const targetPane = document.getElementById(`tab-${targetTab}`);
+            if (targetPane) {
+                targetPane.classList.add('active');
+            }
+            
+            // Si se selecciona la pestaña de estadísticas, actualizar el panel
+            if (targetTab === 'estadisticas') {
+                updateCategoryStatsPanel();
+            }
+        });
+    });
+}
+
+// Configurar búsqueda y ordenamiento de proyectos
+function setupProjectsSearchAndSort() {
+    const searchInput = document.getElementById('project-search');
+    const searchClear = document.getElementById('search-clear');
+    const sortSelect = document.getElementById('project-sort');
+    
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            const query = this.value.toLowerCase().trim();
+            if (searchClear) {
+                searchClear.style.display = query ? 'flex' : 'none';
+            }
+            updateProjectsList();
+        });
+    }
+    
+    if (searchClear) {
+        searchClear.addEventListener('click', function() {
+            if (searchInput) {
+                searchInput.value = '';
+            }
+            this.style.display = 'none';
+            updateProjectsList();
+        });
+    }
+    
+    if (sortSelect) {
+        sortSelect.addEventListener('change', function() {
+            updateProjectsList();
+        });
+    }
+}
+
+// Actualizar lista de proyectos
+function updateProjectsList() {
+    const projectsList = document.getElementById('projects-list');
+    if (!projectsList) return;
+    
+    const searchInput = document.getElementById('project-search');
+    const sortSelect = document.getElementById('project-sort');
+    
+    const searchQuery = searchInput?.value.toLowerCase().trim() || '';
+    const sortValue = sortSelect?.value || 'nombre';
+    
+    // Filtrar proyectos según búsqueda
+    let filteredProjects = proyectosData.filter(proyecto => {
+        if (!searchQuery) return true;
+        const nombre = String(proyecto.nombre || '').toLowerCase();
+        const zona = String(proyecto.zona || '').toLowerCase();
+        const barrio = String(proyecto.barrio || '').toLowerCase();
+        const vende = String(proyecto.vende || '').toLowerCase();
+        return nombre.includes(searchQuery) || 
+               zona.includes(searchQuery) || 
+               barrio.includes(searchQuery) ||
+               vende.includes(searchQuery);
+    });
+    
+    // Ordenar proyectos
+    filteredProjects.sort((a, b) => {
+        switch (sortValue) {
+            case 'nombre':
+                return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+            case 'nombre-desc':
+                return String(b.nombre || '').localeCompare(String(a.nombre || ''));
+            case 'precio':
+                return (a.precio_promedio || 0) - (b.precio_promedio || 0);
+            case 'precio-desc':
+                return (b.precio_promedio || 0) - (a.precio_promedio || 0);
+            case 'score':
+                return (b.score_exito || 0) - (a.score_exito || 0);
+            case 'score-desc':
+                return (a.score_exito || 0) - (b.score_exito || 0);
+            case 'clasificacion':
+                return String(a.clasificacion || '').localeCompare(String(b.clasificacion || ''));
+            case 'zona':
+                return String(a.zona || '').localeCompare(String(b.zona || ''));
+            case 'barrio':
+                return String(a.barrio || '').localeCompare(String(b.barrio || ''));
+            default:
+                return 0;
+        }
+    });
+    
+    // Actualizar badge
+    const proyectosBadge = document.getElementById('proyectos-badge');
+    if (proyectosBadge) {
+        proyectosBadge.textContent = filteredProjects.length;
+    }
+    
+    // Renderizar proyectos
+    if (filteredProjects.length === 0) {
+        projectsList.innerHTML = `
+            <div class="projects-loading">
+                <i class="fas fa-search"></i>
+                <p>No se encontraron proyectos</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    filteredProjects.forEach(proyecto => {
+        const isSelected = selectedProjects.has(proyecto.id);
+        const clasificacion = String(proyecto.clasificacion || 'Moderado').toLowerCase();
+        const precio = formatNumber(proyecto.precio_promedio || 0);
+        const score = (proyecto.score_exito || 0).toFixed(2);
+        
+        html += `
+            <div class="project-card ${isSelected ? 'selected' : ''}" data-project-id="${proyecto.id}">
+                <div class="project-card-header">
+                    <div class="project-name">${escapeHtml(proyecto.nombre || 'Sin nombre')}</div>
+                    <span class="project-badge ${clasificacion}">${proyecto.clasificacion || 'Moderado'}</span>
+                </div>
+                <div class="project-details">
+                    <div class="project-detail-item">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <span>${escapeHtml(proyecto.zona || 'N/A')} - ${escapeHtml(proyecto.barrio || 'N/A')}</span>
+                    </div>
+                    <div class="project-detail-item">
+                        <i class="fas fa-user"></i>
+                        <span>${escapeHtml(proyecto.vende || 'N/A')}</span>
+                    </div>
+                    <div class="project-detail-item">
+                        <i class="fas fa-star"></i>
+                        <span>Score: ${score}</span>
+                    </div>
+                </div>
+                <div class="project-price">
+                    <i class="fas fa-dollar-sign"></i> ${precio} COP
+                </div>
+            </div>
+        `;
+    });
+    
+    projectsList.innerHTML = html;
+    
+    // Agregar event listeners a las tarjetas
+    projectsList.querySelectorAll('.project-card').forEach(card => {
+        card.addEventListener('click', function() {
+            const projectId = parseInt(this.getAttribute('data-project-id'));
+            toggleProjectSelection(projectId);
+        });
+    });
+}
+
+// Toggle selección de proyecto
+function toggleProjectSelection(projectId) {
+    if (selectedProjects.has(projectId)) {
+        selectedProjects.delete(projectId);
+    } else {
+        selectedProjects.add(projectId);
+    }
+    
+    // Actualizar UI
+    const card = document.querySelector(`.project-card[data-project-id="${projectId}"]`);
+    if (card) {
+        card.classList.toggle('selected', selectedProjects.has(projectId));
+    }
+    
+    // Resaltar en el mapa
+    highlightProjectOnMap(projectId, selectedProjects.has(projectId));
+}
+
+// Resaltar proyecto en el mapa
+function highlightProjectOnMap(projectId, highlight) {
+    const marker = projectMarkersMap.get(projectId);
+    if (!marker) return;
+    
+    if (highlight) {
+        // Agregar clase de resaltado
+        marker.setIcon(L.divIcon({
+            className: 'custom-marker highlighted',
+            html: `<div style="background-color: #FFD700; width: 24px; height: 24px; border-radius: 50%; border: 4px solid white; box-shadow: 0 0 20px rgba(255, 215, 0, 0.8);"></div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        }));
+        
+        // Centrar mapa en el proyecto
+        const proyecto = proyectosData.find(p => p.id === projectId);
+        if (proyecto && map) {
+            map.setView([proyecto.lat, proyecto.lon], Math.max(map.getZoom(), 15), {
+                animate: true,
+                duration: 0.5
+            });
+        }
+    } else {
+        // Restaurar icono original
+        const proyecto = proyectosData.find(p => p.id === projectId);
+        if (proyecto) {
+            const color = getMarkerColor(proyecto);
+            marker.setIcon(L.divIcon({
+                className: 'custom-marker',
+                html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            }));
+        }
+    }
 }
 
 // Utilidades
@@ -1426,6 +2107,7 @@ function setupMapControls() {
     const clusterToggle = document.getElementById('cluster-toggle');
     const heatmapToggle = document.getElementById('heatmap-toggle');
     const markersToggle = document.getElementById('markers-toggle');
+    const markerColorSelect = document.getElementById('marker-color-select');
     
     if (!styleSelect || !centerBtn || !clusterToggle || !heatmapToggle || !markersToggle) {
         console.warn('No se encontraron todos los controles del mapa');
@@ -1436,16 +2118,23 @@ function setupMapControls() {
     const savedStyle = localStorage.getItem('mapStyle') || 'satellite';
     const savedClusters = localStorage.getItem('mapClusters') !== 'false';
     const savedHeatmap = localStorage.getItem('mapHeatmap') === 'true';
-    const savedMarkers = localStorage.getItem('mapMarkers') !== 'false';
+    // Por defecto, los marcadores deben estar visibles (true)
+    const savedMarkers = localStorage.getItem('mapMarkers');
+    const savedMarkersEnabled = savedMarkers === null ? true : savedMarkers !== 'false';
+    const savedColorCriterion = localStorage.getItem('markerColorCriterion') || 'clasificacion';
     
     styleSelect.value = savedStyle;
     clusterToggle.checked = savedClusters;
     heatmapToggle.checked = savedHeatmap;
-    markersToggle.checked = savedMarkers;
+    markersToggle.checked = savedMarkersEnabled;
+    if (markerColorSelect) {
+        markerColorSelect.value = savedColorCriterion;
+    }
     
     clustersEnabled = savedClusters;
     heatmapEnabled = savedHeatmap;
-    markersEnabled = savedMarkers;
+    markersEnabled = savedMarkersEnabled; // Usar el valor correcto
+    markerColorCriterion = savedColorCriterion;
     
     // Aplicar estado inicial
     setBaseStyle(savedStyle);
@@ -1480,6 +2169,26 @@ function setupMapControls() {
         updateMarkersToggle();
         saveMapState();
     });
+    
+    // Listener para cambio de criterio de color
+    if (markerColorSelect) {
+        markerColorSelect.addEventListener('change', function() {
+            markerColorCriterion = this.value;
+            localStorage.setItem('markerColorCriterion', markerColorCriterion);
+            // Limpiar selección de categorías y cache de colores al cambiar criterio (estilo Power BI)
+            selectedCategoryId = null;
+            clearColorCache();
+            // Actualizar marcadores con nuevos colores
+            updateMap();
+            // Actualizar panel de categorías y estadísticas
+            updateMarkerLegend();
+            updateCategoryStatsPanel();
+            saveMapState();
+        });
+    }
+    
+    // Inicializar panel de categorías
+    updateMarkerLegend();
     
     // Navegación con teclado
     styleSelect.addEventListener('keydown', function(e) {
@@ -1852,6 +2561,7 @@ function saveMapState() {
     const clusterToggle = document.getElementById('cluster-toggle');
     const heatmapToggle = document.getElementById('heatmap-toggle');
     const markersToggle = document.getElementById('markers-toggle');
+    const markerColorSelect = document.getElementById('marker-color-select');
     
     if (styleSelect) {
         localStorage.setItem('mapStyle', styleSelect.value);
@@ -1868,6 +2578,10 @@ function saveMapState() {
     if (markersToggle) {
         localStorage.setItem('mapMarkers', markersToggle.checked);
         updateURLParam('markers', markersToggle.checked ? '1' : '0');
+    }
+    if (markerColorSelect) {
+        localStorage.setItem('markerColorCriterion', markerColorSelect.value);
+        updateURLParam('markerColor', markerColorSelect.value);
     }
 }
 
@@ -1913,6 +2627,15 @@ function loadMapStateFromURL() {
             updateMarkersToggle();
         }
     }
+    
+    const markerColor = params.get('markerColor');
+    if (markerColor) {
+        const markerColorSelect = document.getElementById('marker-color-select');
+        if (markerColorSelect && ['clasificacion', 'vende', 'año', 'zona', 'barrio'].includes(markerColor)) {
+            markerColorSelect.value = markerColor;
+            markerColorCriterion = markerColor;
+        }
+    }
 }
 
 // Actualizar parámetro en URL
@@ -1920,4 +2643,735 @@ function updateURLParam(key, value) {
     const url = new URL(window.location);
     url.searchParams.set(key, value);
     window.history.replaceState({}, '', url);
+}
+
+// Actualizar panel de categorías de marcadores (ahora en el sidebar)
+function updateMarkerLegend() {
+    const categoriesList = document.getElementById('categories-list');
+    const categoriesTitle = document.getElementById('categories-panel-title');
+    const categoriesSubtitle = document.getElementById('categories-subtitle');
+    
+    if (!categoriesList) {
+        return;
+    }
+    
+    if (!proyectosData || proyectosData.length === 0) {
+        categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay datos disponibles</p></div>';
+        return;
+    }
+    
+    // Obtener categorías únicas según el criterio seleccionado
+    const categorias = new Map();
+    
+    proyectosData.forEach(proyecto => {
+        let categoria = 'N/A';
+        let color = '#95A5A6';
+        
+        switch (markerColorCriterion) {
+            case 'clasificacion':
+                categoria = String(proyecto.clasificacion || 'Moderado').trim();
+                const colors = {
+                    'Exitoso': '#27AE60',
+                    'Moderado': '#F39C12',
+                    'Mejorable': '#E74C3C'
+                };
+                color = colors[categoria] || colors['Moderado'] || '#F39C12';
+                break;
+                
+            case 'vende':
+                categoria = String(proyecto.vende || 'N/A').trim();
+                color = generateColorFromString(categoria);
+                break;
+                
+            case 'año':
+                if (proyecto.año) {
+                    const año_num = parseInt(proyecto.año);
+                    if (año_num >= 2000 && año_num < 2100) {
+                        categoria = String(año_num % 100).padStart(2, '0');
+                    } else {
+                        categoria = String(año_num);
+                    }
+                } else {
+                    categoria = 'N/A';
+                }
+                color = generateColorFromString(categoria);
+                break;
+                
+            case 'zona':
+                categoria = String(proyecto.zona || 'N/A').trim();
+                color = generateColorFromString(categoria);
+                break;
+                
+            case 'barrio':
+                categoria = String(proyecto.barrio || 'N/A').trim();
+                color = generateColorFromString(categoria);
+                break;
+        }
+        
+        if (!categorias.has(categoria)) {
+            categorias.set(categoria, {
+                nombre: categoria,
+                color: color,
+                count: 0,
+                id: categoria.toLowerCase().replace(/\s+/g, '-')
+            });
+        }
+        
+        categorias.get(categoria).count++;
+    });
+    
+    // Ordenar categorías
+    const categoriasArray = Array.from(categorias.values()).sort((a, b) => {
+        if (a.nombre === 'N/A') return 1;
+        if (b.nombre === 'N/A') return -1;
+        if (markerColorCriterion === 'año') {
+            return parseInt(a.nombre) - parseInt(b.nombre);
+        }
+        return a.nombre.localeCompare(b.nombre);
+    });
+    
+    // Guardar todas las categorías
+    allCategories = categoriasArray;
+    
+    // No inicializar selección por defecto (estilo Power BI - sin selección inicial)
+    // selectedCategoryId permanece null hasta que el usuario seleccione una categoría
+    
+    // Actualizar título y subtítulo
+    const titulos = {
+        'clasificacion': 'Filtrar Clasificación',
+        'vende': 'Filtrar Vendedor',
+        'año': 'Filtrar Año',
+        'zona': 'Filtrar Zona',
+        'barrio': 'Filtrar Barrio'
+    };
+    const subtitulos = {
+        'clasificacion': 'Selecciona las clasificaciones a mostrar',
+        'vende': 'Selecciona los vendedores a mostrar',
+        'año': 'Selecciona los años a mostrar',
+        'zona': 'Selecciona las zonas a mostrar',
+        'barrio': 'Selecciona los barrios a mostrar'
+    };
+    
+    if (categoriesTitle) {
+        categoriesTitle.textContent = titulos[markerColorCriterion] || 'Filtrar Categorías';
+    }
+    if (categoriesSubtitle) {
+        categoriesSubtitle.textContent = subtitulos[markerColorCriterion] || 'Selecciona las categorías a mostrar';
+    }
+    
+    // Generar HTML de las categorías
+    if (categoriasArray.length === 0) {
+        categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay categorías disponibles</p></div>';
+        updateCategoriesCount();
+        return;
+    }
+    
+    // Filtrar por búsqueda
+    const searchInput = document.getElementById('categories-search');
+    const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    const filteredCategories = categoriasArray.filter(cat => {
+        if (!searchQuery) return true;
+        return cat.nombre.toLowerCase().includes(searchQuery);
+    });
+    
+    let html = '';
+    filteredCategories.forEach(cat => {
+        const isSelected = selectedCategoryId === cat.id; // Selección única (estilo Power BI)
+        html += `
+            <div class="categories-item ${isSelected ? 'selected' : ''}" data-category-id="${cat.id}">
+                <input type="checkbox" id="cat-${cat.id}" ${isSelected ? 'checked' : ''} data-category-id="${cat.id}">
+                <label for="cat-${cat.id}" class="categories-item-checkbox"></label>
+                <span class="categories-item-color" style="background-color: ${cat.color};"></span>
+                <div class="categories-item-info">
+                    <div class="categories-item-name">${escapeHtml(cat.nombre)}</div>
+                    <div class="categories-item-count">${cat.count} proyecto${cat.count !== 1 ? 's' : ''}</div>
+                </div>
+            </div>
+        `;
+    });
+    
+    if (filteredCategories.length === 0) {
+        html = '<div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div>';
+    }
+    
+    categoriesList.innerHTML = html;
+    
+    // Agregar event listeners a los checkboxes (estilo Power BI - selección única)
+    categoriesList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const categoryId = this.getAttribute('data-category-id');
+            const item = this.closest('.categories-item');
+            
+            if (this.checked) {
+                // Seleccionar esta categoría (deseleccionar la anterior si existe)
+                const previousSelected = selectedCategoryId;
+                selectedCategoryId = categoryId;
+                
+                // Remover selección de la categoría anterior
+                if (previousSelected && previousSelected !== categoryId) {
+                    const previousItem = categoriesList.querySelector(`[data-category-id="${previousSelected}"]`);
+                    if (previousItem) {
+                        previousItem.classList.remove('selected');
+                        const prevCheckbox = previousItem.querySelector('input[type="checkbox"]');
+                        if (prevCheckbox) prevCheckbox.checked = false;
+                    }
+                }
+                
+                if (item) item.classList.add('selected');
+                filterBySelectedCategory();
+            } else {
+                // Deseleccionar
+                selectedCategoryId = null;
+                if (item) item.classList.remove('selected');
+                showAllCategories();
+            }
+            
+            updateCategoriesCount();
+        });
+    });
+    
+    // Agregar event listener al item completo (click en cualquier parte)
+    categoriesList.querySelectorAll('.categories-item').forEach(item => {
+        item.addEventListener('click', function(e) {
+            if (e.target.type !== 'checkbox' && e.target.tagName !== 'LABEL') {
+                const checkbox = this.querySelector('input[type="checkbox"]');
+                if (checkbox) {
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event('change'));
+                }
+            }
+        });
+    });
+    
+    updateCategoriesCount();
+    
+    // Actualizar panel de estadísticas con información de categorías
+    updateCategoryStatsPanel();
+}
+
+// Variables globales para búsqueda y ordenamiento de categorías
+let categorySearchQuery = '';
+let categorySortOrder = 'count-desc';
+
+// Actualizar panel de estadísticas con información de categorías
+function updateCategoryStatsPanel() {
+    const categoryStatsItems = document.getElementById('category-stats-items');
+    const statsSectionTitle = document.getElementById('stats-section-title');
+    
+    if (!allCategories.length) return;
+    
+    // Actualizar título de la sección
+    const titulos = {
+        'clasificacion': 'Clasificación',
+        'vende': 'Vendedor',
+        'año': 'Año',
+        'zona': 'Zona',
+        'barrio': 'Barrio'
+    };
+    const currentTitle = titulos[markerColorCriterion] || 'Categoría';
+    if (statsSectionTitle) {
+        statsSectionTitle.textContent = `Estadísticas por ${currentTitle}`;
+    }
+    
+    // Mostrar lista detallada de categorías con estadísticas
+    if (categoryStatsItems) {
+        // Usar datos originales para calcular estadísticas completas
+        const sourceData = proyectosDataOriginal.length > 0 ? proyectosDataOriginal : proyectosData;
+        
+        // Preparar datos de categorías con estadísticas
+        const categoriesWithStats = allCategories.map(cat => {
+            // Calcular estadísticas para esta categoría
+            const categoryProjects = sourceData.filter(proyecto => {
+                let categoria = 'N/A';
+                
+                switch (markerColorCriterion) {
+                    case 'clasificacion':
+                        categoria = String(proyecto.clasificacion || 'Moderado').trim();
+                        break;
+                    case 'vende':
+                        categoria = String(proyecto.vende || 'N/A').trim();
+                        break;
+                    case 'año':
+                        if (proyecto.año) {
+                            const año_num = parseInt(proyecto.año);
+                            categoria = año_num >= 2000 && año_num < 2100 
+                                ? String(año_num % 100).padStart(2, '0')
+                                : String(año_num);
+                        }
+                        break;
+                    case 'zona':
+                        categoria = String(proyecto.zona || 'N/A').trim();
+                        break;
+                    case 'barrio':
+                        categoria = String(proyecto.barrio || 'N/A').trim();
+                        break;
+                }
+                
+                return categoria === cat.nombre;
+            });
+            
+            const exitosos = categoryProjects.filter(p => p.clasificacion === 'Exitoso').length;
+            const moderados = categoryProjects.filter(p => p.clasificacion === 'Moderado').length;
+            const mejorables = categoryProjects.filter(p => p.clasificacion === 'Mejorable').length;
+            
+            return {
+                ...cat,
+                exitosos,
+                moderados,
+                mejorables,
+                isSelected: selectedCategoryId === cat.id // Selección única (estilo Power BI)
+            };
+        });
+        
+        // Aplicar búsqueda
+        const searchInput = document.getElementById('category-stats-search');
+        const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
+        categorySearchQuery = searchQuery;
+        
+        let filteredCategories = categoriesWithStats;
+        if (searchQuery) {
+            filteredCategories = categoriesWithStats.filter(cat => 
+                cat.nombre.toLowerCase().includes(searchQuery)
+            );
+        }
+        
+        // Aplicar ordenamiento
+        const sortSelect = document.getElementById('category-stats-sort');
+        const sortOrder = sortSelect ? sortSelect.value : 'count-desc';
+        categorySortOrder = sortOrder;
+        
+        filteredCategories.sort((a, b) => {
+            switch (sortOrder) {
+                case 'name-asc':
+                    if (a.nombre === 'N/A') return 1;
+                    if (b.nombre === 'N/A') return -1;
+                    return a.nombre.localeCompare(b.nombre);
+                case 'name-desc':
+                    if (a.nombre === 'N/A') return 1;
+                    if (b.nombre === 'N/A') return -1;
+                    return b.nombre.localeCompare(a.nombre);
+                case 'count-asc':
+                    return a.count - b.count;
+                case 'count-desc':
+                default:
+                    return b.count - a.count;
+            }
+        });
+        
+        // Generar HTML
+        let statsHtml = '';
+        if (filteredCategories.length === 0) {
+            statsHtml = '<div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div>';
+        } else {
+            filteredCategories.forEach(cat => {
+                statsHtml += `
+                    <div class="category-stat-item ${cat.isSelected ? 'active' : ''}" data-category-id="${cat.id}" data-category-name="${escapeHtml(cat.nombre)}">
+                        <span class="category-stat-color" style="background-color: ${cat.color};"></span>
+                        <div class="category-stat-info">
+                            <div class="category-stat-name">${escapeHtml(cat.nombre)}</div>
+                            <div class="category-stat-details">
+                                <div class="category-stat-detail-item">
+                                    <i class="fas fa-check-circle" style="color: #27AE60;"></i>
+                                    <span>${cat.exitosos}</span>
+                                </div>
+                                <div class="category-stat-detail-item">
+                                    <i class="fas fa-exclamation-circle" style="color: #F39C12;"></i>
+                                    <span>${cat.moderados}</span>
+                                </div>
+                                <div class="category-stat-detail-item">
+                                    <i class="fas fa-times-circle" style="color: #E74C3C;"></i>
+                                    <span>${cat.mejorables}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="category-stat-count">${cat.count}</div>
+                    </div>
+                `;
+            });
+        }
+        
+        categoryStatsItems.innerHTML = statsHtml;
+        
+        // Agregar event listeners para filtrar al hacer click (estilo Power BI)
+        categoryStatsItems.querySelectorAll('.category-stat-item').forEach(item => {
+            item.addEventListener('click', function() {
+                const categoryId = this.getAttribute('data-category-id');
+                const categoryName = this.getAttribute('data-category-name');
+                
+                // Toggle estilo Power BI: si ya estaba seleccionado, deseleccionar; si no, seleccionar (y deseleccionar la anterior)
+                const wasSelected = selectedCategoryId === categoryId;
+                
+                if (wasSelected) {
+                    // Deseleccionar: remover la selección
+                    selectedCategoryId = null;
+                    this.classList.remove('active');
+                    
+                    // Restaurar todo (mostrar todos los proyectos)
+                    showAllCategories();
+                } else {
+                    // Seleccionar esta categoría (deseleccionar la anterior si existe)
+                    const previousSelected = selectedCategoryId;
+                    selectedCategoryId = categoryId;
+                    
+                    // Remover resaltado de la categoría anterior
+                    if (previousSelected) {
+                        const previousItem = categoryStatsItems.querySelector(`[data-category-id="${previousSelected}"]`);
+                        if (previousItem) {
+                            previousItem.classList.remove('active');
+                        }
+                    }
+                    
+                    // Resaltar la nueva categoría seleccionada
+                    this.classList.add('active');
+                    
+                    // Filtrar para mostrar solo los proyectos de esta categoría
+                    filterBySelectedCategory();
+                }
+            });
+        });
+        
+        // Actualizar estados visuales después de renderizar
+        updateCategoryStatsItemsState();
+        
+        // Configurar event listeners para búsqueda y ordenamiento
+        setupCategoryStatsControls();
+    }
+}
+
+// Configurar controles de búsqueda y ordenamiento para categorías
+function setupCategoryStatsControls() {
+    const searchInput = document.getElementById('category-stats-search');
+    const searchClear = document.getElementById('category-stats-search-clear');
+    const sortSelect = document.getElementById('category-stats-sort');
+    
+    // Búsqueda
+    if (searchInput) {
+        // Restaurar búsqueda guardada
+        if (categorySearchQuery) {
+            searchInput.value = categorySearchQuery;
+        }
+        
+        searchInput.addEventListener('input', function() {
+            const query = this.value.toLowerCase().trim();
+            categorySearchQuery = query;
+            
+            // Mostrar/ocultar botón de limpiar
+            if (searchClear) {
+                searchClear.style.display = query ? 'flex' : 'none';
+            }
+            
+            // Actualizar panel
+            updateCategoryStatsPanel();
+        });
+        
+        // Limpiar búsqueda
+        if (searchClear) {
+            searchClear.addEventListener('click', function() {
+                searchInput.value = '';
+                categorySearchQuery = '';
+                this.style.display = 'none';
+                updateCategoryStatsPanel();
+            });
+        }
+    }
+    
+    // Ordenamiento
+    if (sortSelect) {
+        // Restaurar ordenamiento guardado
+        if (categorySortOrder) {
+            sortSelect.value = categorySortOrder;
+        }
+        
+        sortSelect.addEventListener('change', function() {
+            categorySortOrder = this.value;
+            updateCategoryStatsPanel();
+        });
+    }
+}
+
+// Filtrar mapa por categoría seleccionada (estilo Power BI - selección única)
+function filterBySelectedCategory() {
+    if (!selectedCategoryId) {
+        showAllCategories();
+        return;
+    }
+    
+    // Filtrar los datos como lo hacen los filtros normales
+    // Mostrar SOLO los proyectos de la categoría seleccionada
+    const sourceData = proyectosDataOriginal.length > 0 ? proyectosDataOriginal : proyectosData;
+    
+    proyectosData = sourceData.filter(proyecto => {
+        let categoria = 'N/A';
+        
+        switch (markerColorCriterion) {
+            case 'clasificacion':
+                categoria = String(proyecto.clasificacion || 'Moderado').trim();
+                break;
+            case 'vende':
+                categoria = String(proyecto.vende || 'N/A').trim();
+                break;
+            case 'año':
+                if (proyecto.año) {
+                    const año_num = parseInt(proyecto.año);
+                    categoria = año_num >= 2000 && año_num < 2100 
+                        ? String(año_num % 100).padStart(2, '0')
+                        : String(año_num);
+                }
+                break;
+            case 'zona':
+                categoria = String(proyecto.zona || 'N/A').trim();
+                break;
+            case 'barrio':
+                categoria = String(proyecto.barrio || 'N/A').trim();
+                break;
+        }
+        
+        const catId = categoria.toLowerCase().replace(/\s+/g, '-');
+        return catId === selectedCategoryId;
+    });
+    
+    // Actualizar todas las vistas con los datos filtrados
+    updateMap();
+    
+    // Enfocar en los puntos filtrados
+    if (proyectosData.length > 0) {
+        fitToData();
+    }
+    
+    updateTable();
+    updateStats();
+    updateCategoriesCount();
+    
+    // Actualizar estados visuales de los items
+    updateCategoryStatsItemsState();
+}
+
+// Filtrar mapa por categorías seleccionadas (como los filtros normales)
+// Esta función ya no se usa, reemplazada por filterBySelectedCategory (selección única)
+// Se mantiene por compatibilidad pero no debería ser llamada
+function filterBySelectedCategories() {
+    // Redirigir a la nueva función de selección única
+    filterBySelectedCategory();
+}
+
+
+// Actualizar estados visuales de los items de categorías (estilo Power BI)
+function updateCategoryStatsItemsState() {
+    const categoryStatsItems = document.getElementById('category-stats-items');
+    if (!categoryStatsItems) return;
+    
+    categoryStatsItems.querySelectorAll('.category-stat-item').forEach(item => {
+        const categoryId = item.getAttribute('data-category-id');
+        // Solo una categoría puede estar activa (selección única)
+        if (selectedCategoryId === categoryId) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+}
+
+// Mostrar todas las categorías (restaurar vista completa - estilo Power BI)
+function showAllCategories() {
+    // Limpiar la selección
+    selectedCategoryId = null;
+    
+    // Restaurar datos originales si existen
+    if (proyectosDataOriginal.length > 0) {
+        proyectosData = [...proyectosDataOriginal];
+    }
+    
+    // Actualizar vistas
+    updateMap();
+    
+    // Restaurar vista completa del mapa (centrar en todos los proyectos)
+    fitToData();
+    
+    updateTable();
+    updateStats();
+    updateCategoriesCount();
+    
+    // Actualizar estados visuales de los items (remover resaltado)
+    updateCategoryStatsItemsState();
+    
+    // Actualizar panel de categorías para reflejar que no hay selección
+    updateCategoryStatsPanel();
+}
+
+// Actualizar contador de categorías seleccionadas (estilo Power BI)
+function updateCategoriesCount() {
+    const countElement = document.getElementById('categories-count');
+    if (countElement) {
+        // Solo puede haber una categoría seleccionada (o ninguna)
+        if (selectedCategoryId) {
+            countElement.textContent = '1 seleccionada';
+        } else {
+            countElement.textContent = 'Ninguna';
+        }
+    }
+}
+
+// Configurar panel de categorías (ahora en el sidebar)
+function setupCategoriesPanel() {
+    const selectAllBtn = document.getElementById('categories-select-all');
+    const deselectAllBtn = document.getElementById('categories-deselect-all');
+    const applyBtn = document.getElementById('categories-apply-btn');
+    const searchInput = document.getElementById('categories-search');
+    const searchClear = document.getElementById('categories-search-clear');
+    
+    // Seleccionar todas (no aplicable en selección única, pero mantener para compatibilidad)
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // En selección única, no tiene sentido "seleccionar todas"
+            // Simplemente no hacer nada o mostrar un mensaje
+            console.log('Selección única activa: solo se puede seleccionar una categoría a la vez');
+        });
+    }
+    
+    // Deseleccionar todas (estilo Power BI)
+    if (deselectAllBtn) {
+        deselectAllBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            selectedCategoryId = null;
+            showAllCategories();
+            updateCategoriesList();
+            updateCategoriesCount();
+        });
+    }
+    
+    // Aplicar filtros (ya no necesario con selección única, pero mantener para compatibilidad)
+    if (applyBtn) {
+        applyBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // Con selección única, el filtro se aplica automáticamente al seleccionar
+            // Esta función ya no es necesaria pero se mantiene por compatibilidad
+            if (selectedCategoryId) {
+                filterBySelectedCategory();
+            } else {
+                showAllCategories();
+            }
+        });
+    }
+    
+    // Búsqueda
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            const query = this.value.toLowerCase().trim();
+            if (searchClear) {
+                searchClear.style.display = query ? 'flex' : 'none';
+            }
+            updateCategoriesList();
+        });
+    }
+    
+    if (searchClear) {
+        searchClear.addEventListener('click', function() {
+            if (searchInput) {
+                searchInput.value = '';
+            }
+            this.style.display = 'none';
+            updateCategoriesList();
+        });
+    }
+}
+
+// Actualizar lista de categorías (solo renderizado, sin cambiar selección)
+function updateCategoriesList() {
+    const categoriesList = document.getElementById('categories-list');
+    if (!categoriesList || allCategories.length === 0) return;
+    
+    const searchInput = document.getElementById('categories-search');
+    const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    
+    const filteredCategories = allCategories.filter(cat => {
+        if (!searchQuery) return true;
+        return cat.nombre.toLowerCase().includes(searchQuery);
+    });
+    
+    if (filteredCategories.length === 0) {
+        categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div>';
+        return;
+    }
+    
+    let html = '';
+    filteredCategories.forEach(cat => {
+        const isSelected = selectedCategoryId === cat.id; // Selección única (estilo Power BI)
+        html += `
+            <div class="categories-item ${isSelected ? 'selected' : ''}" data-category-id="${cat.id}">
+                <input type="checkbox" id="cat-${cat.id}" ${isSelected ? 'checked' : ''} data-category-id="${cat.id}">
+                <label for="cat-${cat.id}" class="categories-item-checkbox"></label>
+                <span class="categories-item-color" style="background-color: ${cat.color};"></span>
+                <div class="categories-item-info">
+                    <div class="categories-item-name">${escapeHtml(cat.nombre)}</div>
+                    <div class="categories-item-count">${cat.count} proyecto${cat.count !== 1 ? 's' : ''}</div>
+                </div>
+            </div>
+        `;
+    });
+    
+    categoriesList.innerHTML = html;
+    
+    // Agregar event listeners (estilo Power BI - selección única)
+    categoriesList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const categoryId = this.getAttribute('data-category-id');
+            const item = this.closest('.categories-item');
+            
+            if (this.checked) {
+                // Seleccionar esta categoría (deseleccionar la anterior si existe)
+                const previousSelected = selectedCategoryId;
+                selectedCategoryId = categoryId;
+                
+                // Remover selección de la categoría anterior
+                if (previousSelected && previousSelected !== categoryId) {
+                    const previousItem = categoriesList.querySelector(`[data-category-id="${previousSelected}"]`);
+                    if (previousItem) {
+                        previousItem.classList.remove('selected');
+                        const prevCheckbox = previousItem.querySelector('input[type="checkbox"]');
+                        if (prevCheckbox) prevCheckbox.checked = false;
+                    }
+                }
+                
+                if (item) item.classList.add('selected');
+                filterBySelectedCategory();
+            } else {
+                // Deseleccionar
+                selectedCategoryId = null;
+                if (item) item.classList.remove('selected');
+                showAllCategories();
+            }
+            
+            updateCategoriesCount();
+        });
+    });
+    
+    categoriesList.querySelectorAll('.categories-item').forEach(item => {
+        item.addEventListener('click', function(e) {
+            if (e.target.type !== 'checkbox' && e.target.tagName !== 'LABEL') {
+                const checkbox = this.querySelector('input[type="checkbox"]');
+                if (checkbox) {
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event('change'));
+                }
+            }
+        });
+    });
+}
+
+// Aplicar filtros de categorías (estilo Power BI - selección única)
+function applyCategoryFilters() {
+    // Con selección única, el filtro se aplica automáticamente
+    // Esta función se mantiene por compatibilidad
+    if (selectedCategoryId) {
+        filterBySelectedCategory();
+    } else {
+        showAllCategories();
+    }
+}
+
+// Configurar toggle de leyenda de marcadores (mantener para compatibilidad)
+function setupMarkerLegendToggle() {
+    // Ahora usamos setupCategoriesPanel
+    setupCategoriesPanel();
 }

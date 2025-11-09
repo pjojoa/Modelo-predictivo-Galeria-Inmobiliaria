@@ -16,6 +16,7 @@
     
     <!-- CSS personalizado -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/sidebar-modern.css') }}">
 </head>
 <body>
     <!-- Header -->
@@ -28,182 +29,319 @@
 
     <!-- Contenedor principal -->
     <div class="container main-container">
-        <!-- Sidebar de filtros -->
+        <!-- Sidebar de filtros y proyectos -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <h2><i class="fas fa-filter"></i> Filtros</h2>
+                <h2><i class="fas fa-sliders-h"></i> <span class="sidebar-title">Panel de Control</span></h2>
                 <div class="sidebar-controls">
-                    <button class="sidebar-toggle" id="sidebar-toggle" title="Colapsar/Expandir">
+                    <button class="sidebar-toggle" id="sidebar-toggle" title="Colapsar/Expandir" aria-label="Colapsar sidebar">
                         <i class="fas fa-chevron-left"></i>
                     </button>
-                    <button class="sidebar-resize" id="sidebar-resize" title="Cambiar ancho">
+                    <button class="sidebar-resize" id="sidebar-resize" title="Cambiar ancho" aria-label="Redimensionar sidebar">
                         <i class="fas fa-arrows-alt-h"></i>
                     </button>
                 </div>
             </div>
-            <div class="sidebar-content" id="sidebar-content">
             
+            <div class="sidebar-content" id="sidebar-content">
+                <!-- Pestañas del sidebar -->
+                <div class="sidebar-tabs">
+                    <button class="sidebar-tab active" data-tab="filtros" aria-label="Pestaña Filtros">
+                        <i class="fas fa-filter"></i>
+                        <span>Filtros</span>
+                    </button>
+                    <button class="sidebar-tab" data-tab="estadisticas" aria-label="Pestaña Estadísticas y Categorías">
+                        <i class="fas fa-chart-pie"></i>
+                        <span>Estadísticas</span>
+                    </button>
+                </div>
+                
+                <!-- Contenido de pestañas -->
+                <div class="sidebar-tab-content">
+                    <!-- Pestaña: Filtros -->
+                    <div class="tab-pane active" id="tab-filtros">
             <div class="filter-section">
-                <label for="clasificacion">Clasificación</label>
-                <select id="clasificacion" class="filter-select">
+                            <label for="clasificacion" class="filter-label">
+                                <i class="fas fa-tags"></i> Clasificación
+                            </label>
+                            <select id="clasificacion" class="filter-select modern-select">
                     <option value="Todos">Todos</option>
                 </select>
             </div>
             
             <div class="filter-section">
-                <label for="zona">Zona</label>
-                <select id="zona" class="filter-select">
+                            <label for="zona" class="filter-label">
+                                <i class="fas fa-map-marked-alt"></i> Zona
+                            </label>
+                            <select id="zona" class="filter-select modern-select">
                     <option value="Todas">Todas</option>
                 </select>
             </div>
             
             <div class="filter-section">
-                <label for="barrio">Barrio</label>
-                <select id="barrio" class="filter-select">
+                            <label for="barrio" class="filter-label">
+                                <i class="fas fa-map-marker-alt"></i> Barrio
+                            </label>
+                            <select id="barrio" class="filter-select modern-select">
                     <option value="Todos">Todos</option>
                 </select>
             </div>
             
             <div class="filter-section">
-                <label for="tipo_vis">Tipo VIS</label>
-                <select id="tipo_vis" class="filter-select">
+                            <label for="tipo_vis" class="filter-label">
+                                <i class="fas fa-home"></i> Tipo VIS
+                            </label>
+                            <select id="tipo_vis" class="filter-select modern-select">
                     <option value="Todos">Todos</option>
                 </select>
             </div>
             
             <div class="filter-section">
-                <label for="estado">Estado del Proyecto</label>
-                <select id="estado" class="filter-select">
-                    <option value="Activos" selected>Activos</option>
+                            <label for="estado" class="filter-label">
+                                <i class="fas fa-toggle-on"></i> Estado del Proyecto
+                            </label>
+                            <select id="estado" class="filter-select modern-select">
+                                <option value="Activos" selected>Activos</option>
                     <option value="Todos">Todos</option>
                     <option value="Inactivos">Inactivos</option>
                 </select>
             </div>
             
             <div class="filter-section">
-                <label for="precio_range">Rango de Precio (COP)</label>
-                <div class="price-range">
-                    <div class="price-input-group">
-                        <label for="precio_min" class="price-label">Mínimo</label>
-                        <input type="number" id="precio_min" class="price-input" placeholder="Mínimo" min="0" step="100000">
-                    </div>
-                    <span class="price-separator">-</span>
-                    <div class="price-input-group">
-                        <label for="precio_max" class="price-label">Máximo</label>
-                        <input type="number" id="precio_max" class="price-input" placeholder="Máximo" min="0" step="100000">
-                    </div>
-                </div>
-                <div class="price-range-info">
-                    <small id="precio_range_info" class="price-info-text">Rango completo disponible</small>
-                </div>
-                <div class="price-buttons">
-                    <button id="aplicar_precio" class="btn-apply">Aplicar Filtro</button>
-                    <button id="limpiar_precio" class="btn-clear">Limpiar</button>
-                </div>
-            </div>
-            
-            <div class="sidebar-stats">
-                <h3><i class="fas fa-chart-pie"></i> Estadísticas</h3>
-                <div class="stat-item">
-                    <span class="stat-label">Total Proyectos</span>
-                    <span class="stat-value" id="total-proyectos">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Exitosos</span>
-                    <span class="stat-value" id="exitosos">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Moderados</span>
-                    <span class="stat-value" id="moderados">0</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">Mejorables</span>
-                    <span class="stat-value" id="mejorables">0</span>
+                            <label for="precio_range" class="filter-label">
+                                <i class="fas fa-dollar-sign"></i> Rango de Precio (COP)
+                            </label>
+                            <div class="price-range-modern">
+                                <div class="price-input-wrapper">
+                                    <label for="precio_min" class="price-label-modern">Mínimo</label>
+                                    <input type="number" id="precio_min" class="price-input-modern" placeholder="0" min="0" step="100000">
+                                </div>
+                                <div class="price-separator-modern">
+                                    <i class="fas fa-arrows-alt-h"></i>
+                                </div>
+                                <div class="price-input-wrapper">
+                                    <label for="precio_max" class="price-label-modern">Máximo</label>
+                                    <input type="number" id="precio_max" class="price-input-modern" placeholder="∞" min="0" step="100000">
+                                </div>
+                            </div>
+                            <div class="price-range-info-modern">
+                                <small id="precio_range_info" class="price-info-text-modern">Rango completo disponible</small>
+                            </div>
+                            <div class="price-buttons-modern">
+                                <button id="aplicar_precio" class="btn-apply-modern">
+                                    <i class="fas fa-check"></i> Aplicar
+                                </button>
+                                <button id="limpiar_precio" class="btn-clear-modern">
+                                    <i class="fas fa-times"></i> Limpiar
+                                </button>
+                            </div>
                 </div>
             </div>
             
-            <div class="sidebar-info">
-                <details>
-                    <summary><i class="fas fa-question-circle"></i> ¿Cómo se clasifican los proyectos?</summary>
-                    <div class="info-content">
-                        <h4>Sistema de Clasificación de Proyectos</h4>
+                    <!-- Pestaña: Estadísticas y Categorías -->
+                    <div class="tab-pane" id="tab-estadisticas">
+                        <!-- Panel de Categorías de Clasificación -->
+                        <div class="categories-panel-sidebar" id="categories-panel-sidebar">
+                            <div class="categories-sidebar-header">
+                                <div class="categories-sidebar-header-left">
+                                    <i class="fas fa-layer-group"></i>
+                                    <div class="categories-sidebar-header-text">
+                                        <strong id="categories-panel-title">Filtrar Categorías</strong>
+                                        <span class="categories-sidebar-subtitle" id="categories-subtitle">Selecciona las categorías a mostrar</span>
+                                    </div>
+                                </div>
+                                <div class="categories-sidebar-header-actions">
+                                    <button class="categories-sidebar-action-btn tooltip-trigger" id="categories-select-all" title="Seleccionar todas">
+                                        <i class="fas fa-check-double"></i>
+                                    </button>
+                                    <button class="categories-sidebar-action-btn tooltip-trigger" id="categories-deselect-all" title="Deseleccionar todas">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                </div>
+                </div>
+                            
+                            <div class="categories-sidebar-content">
+                                <div class="categories-search-box-sidebar">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" id="categories-search" class="categories-search-input-sidebar" placeholder="Buscar categoría...">
+                                    <button class="categories-search-clear-sidebar" id="categories-search-clear" style="display: none;">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                </div>
+                                
+                                <div class="categories-list-sidebar" id="categories-list">
+                                    <div class="categories-loading">
+                                        <i class="fas fa-spinner fa-spin"></i>
+                                        <p>Cargando categorías...</p>
+                </div>
+            </div>
+            
+                                <div class="categories-footer-sidebar">
+                                    <div class="categories-stats-sidebar">
+                                        <span class="categories-count" id="categories-count">0 seleccionadas</span>
+                                    </div>
+                                    <button class="categories-apply-btn-sidebar" id="categories-apply-btn">
+                                        <i class="fas fa-filter"></i>
+                                        <span>Aplicar</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         
+                        <!-- Estadísticas de la Clasificación Seleccionada -->
+                        <div class="stats-section-sidebar">
+                            <div class="stats-section-header">
+                                <i class="fas fa-chart-pie"></i>
+                                <h3 id="stats-section-title">Estadísticas por Categoría</h3>
+                            </div>
+                            
+                            <div class="stats-grid-sidebar">
+                                <div class="stat-card-sidebar">
+                                    <div class="stat-icon-sidebar" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                                        <i class="fas fa-building"></i>
+                                    </div>
+                                    <div class="stat-info-sidebar">
+                                        <div class="stat-label-sidebar">Total Proyectos</div>
+                                        <div class="stat-value-sidebar" id="total-proyectos">0</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="stat-card-sidebar success">
+                                    <div class="stat-icon-sidebar" style="background: linear-gradient(135deg, #27AE60 0%, #229954 100%);">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                    <div class="stat-info-sidebar">
+                                        <div class="stat-label-sidebar">Exitosos</div>
+                                        <div class="stat-value-sidebar" id="exitosos">0</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="stat-card-sidebar moderate">
+                                    <div class="stat-icon-sidebar" style="background: linear-gradient(135deg, #F39C12 0%, #E67E22 100%);">
+                                        <i class="fas fa-exclamation-circle"></i>
+                                    </div>
+                                    <div class="stat-info-sidebar">
+                                        <div class="stat-label-sidebar">Moderados</div>
+                                        <div class="stat-value-sidebar" id="moderados">0</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="stat-card-sidebar improve">
+                                    <div class="stat-icon-sidebar" style="background: linear-gradient(135deg, #E74C3C 0%, #C0392B 100%);">
+                                        <i class="fas fa-times-circle"></i>
+                                    </div>
+                                    <div class="stat-info-sidebar">
+                                        <div class="stat-label-sidebar">Mejorables</div>
+                                        <div class="stat-value-sidebar" id="mejorables">0</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Lista de categorías con colores y estadísticas -->
+                            <div class="category-stats-list" id="category-stats-list">
+                                <div class="category-stats-header">
+                                    <i class="fas fa-list-ul"></i>
+                                    <span>Distribución por Categoría</span>
+                                </div>
+                                
+                                <!-- Buscador y controles de ordenamiento -->
+                                <div class="category-stats-controls">
+                                    <div class="category-search-wrapper">
+                                        <i class="fas fa-search"></i>
+                                        <input type="text" id="category-stats-search" class="category-stats-search-input" placeholder="Buscar categoría...">
+                                        <button type="button" id="category-stats-search-clear" class="category-stats-search-clear" style="display: none;">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                    <div class="category-sort-wrapper">
+                                        <label for="category-stats-sort" class="category-sort-label">
+                                            <i class="fas fa-sort"></i>
+                                            Ordenar:
+                                        </label>
+                                        <select id="category-stats-sort" class="category-stats-sort-select">
+                                            <option value="name-asc">Nombre (A-Z)</option>
+                                            <option value="name-desc">Nombre (Z-A)</option>
+                                            <option value="count-asc">Cantidad (Menor)</option>
+                                            <option value="count-desc" selected>Cantidad (Mayor)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                
+                                <div class="category-stats-items" id="category-stats-items">
+                                    <!-- Se llenará dinámicamente -->
+                                </div>
+                            </div>
+                            
+                            <div class="stats-chart-container-sidebar">
+                                <div class="chart-title-sidebar">
+                                    <i class="fas fa-chart-bar"></i> Distribución por Clasificación
+                                </div>
+                                <div class="chart-bars-sidebar" id="chart-bars">
+                                    <div class="chart-bar-item-sidebar">
+                                        <div class="chart-bar-label-sidebar">Exitosos</div>
+                                        <div class="chart-bar-wrapper-sidebar">
+                                            <div class="chart-bar-fill-sidebar success" id="chart-exitosos" style="width: 0%"></div>
+                                            <span class="chart-bar-value-sidebar" id="chart-exitosos-value">0%</span>
+                                        </div>
+                                    </div>
+                                    <div class="chart-bar-item-sidebar">
+                                        <div class="chart-bar-label-sidebar">Moderados</div>
+                                        <div class="chart-bar-wrapper-sidebar">
+                                            <div class="chart-bar-fill-sidebar moderate" id="chart-moderados" style="width: 0%"></div>
+                                            <span class="chart-bar-value-sidebar" id="chart-moderados-value">0%</span>
+                                        </div>
+                                    </div>
+                                    <div class="chart-bar-item-sidebar">
+                                        <div class="chart-bar-label-sidebar">Mejorables</div>
+                                        <div class="chart-bar-wrapper-sidebar">
+                                            <div class="chart-bar-fill-sidebar improve" id="chart-mejorables" style="width: 0%"></div>
+                                            <span class="chart-bar-value-sidebar" id="chart-mejorables-value">0%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Información de clasificación (colapsable) -->
+                <div class="sidebar-info-modern">
+                    <details class="info-details">
+                        <summary class="info-summary">
+                            <i class="fas fa-question-circle"></i>
+                            <span>¿Cómo se clasifican los proyectos?</span>
+                            <i class="fas fa-chevron-down summary-arrow"></i>
+                        </summary>
+                        <div class="info-content-modern">
+                            <h4>Sistema de Clasificación de Proyectos</h4>
                         <p>Los proyectos se clasifican en tres categorías basándose en múltiples métricas y un modelo de Machine Learning avanzado:</p>
                         
-                        <div class="classification-detail">
+                            <div class="classification-detail-modern">
                             <h5><i class="fas fa-check-circle" style="color: #27AE60;"></i> Exitosos</h5>
                             <ul>
                                 <li><strong>Score de Éxito:</strong> 0.62 - 0.79</li>
                                 <li><strong>Velocidad de ventas:</strong> Alta (típicamente 22+ unidades/mes)</li>
                                 <li><strong>Meses para agotar:</strong> Menos de 18 meses</li>
-                                <li><strong>Características:</strong> Proyectos con excelente desempeño, alta demanda y rápida rotación de inventario</li>
                             </ul>
                         </div>
                         
-                        <div class="classification-detail">
+                            <div class="classification-detail-modern">
                             <h5><i class="fas fa-exclamation-circle" style="color: #F39C12;"></i> Moderados</h5>
                             <ul>
                                 <li><strong>Score de Éxito:</strong> 0.50 - 0.62</li>
                                 <li><strong>Velocidad de ventas:</strong> Media (típicamente 8-22 unidades/mes)</li>
                                 <li><strong>Meses para agotar:</strong> 18 - 36 meses</li>
-                                <li><strong>Características:</strong> Proyectos con desempeño estándar, ventas constantes pero no excepcionales</li>
                             </ul>
                         </div>
                         
-                        <div class="classification-detail">
+                            <div class="classification-detail-modern">
                             <h5><i class="fas fa-times-circle" style="color: #E74C3C;"></i> Mejorables</h5>
                             <ul>
                                 <li><strong>Score de Éxito:</strong> 0.21 - 0.50</li>
                                 <li><strong>Velocidad de ventas:</strong> Baja (menos de 8 unidades/mes)</li>
                                 <li><strong>Meses para agotar:</strong> Más de 36 meses</li>
-                                <li><strong>Características:</strong> Proyectos que requieren atención, con bajas ventas y necesidad de estrategias de mejora</li>
                             </ul>
                         </div>
-                        
-                        <h5>Factores Considerados en la Clasificación:</h5>
-                        <ul class="factors-list">
-                            <li><strong>Tiempo de agotamiento (30%):</strong> Meses estimados para vender el inventario disponible</li>
-                            <li><strong>Velocidad de ventas (18%):</strong> Unidades vendidas por mes</li>
-                            <li><strong>Penetración de mercado (12%):</strong> Porcentaje de unidades vendidas vs. total</li>
-                            <li><strong>Antigüedad y eficiencia temporal (10%):</strong> Tiempo objetivo de 24 meses (2 años) para cerrar un proyecto exitoso. Proyectos que cerraron en menos de 24 meses reciben score alto. Proyectos inactivos (ya vendidos) usan solo el tiempo desde inicio. Proyectos activos usan tiempo desde inicio + tiempo para agotar.</li>
-                            <li><strong>Tamaño del proyecto (7%):</strong> Número de unidades (óptimo: 50-150 unidades)</li>
-                            <li><strong>Precio por m² (7%):</strong> Posición competitiva dentro del segmento (zona/estrato)</li>
-                            <li><strong>Área promedio (5%):</strong> Área de los inmuebles (óptimo: 60-100 m²)</li>
-                            <li><strong>Características inmuebles (4%):</strong> Alcobas (2-3), Baños (2-3), Garajes (1-2)</li>
-                            <li><strong>Amenidades (3%):</strong> Número y tipo de amenidades en zonas comunes</li>
-                            <li><strong>Patrón de ventas (2%):</strong> Acelerado, Constante o Desacelerado</li>
-                            <li><strong>Segmentación:</strong> Clasificación por Zona, Estrato y Tipo VIS para comparaciones justas</li>
-                            <li><strong>Modelo ML:</strong> RandomForest Regressor para predecir meses de agotamiento</li>
-                        </ul>
-                        
-                        <div class="classification-detail" style="margin-top: 1rem; background: #FFF3CD; padding: 1rem; border-radius: 8px; border-left: 4px solid #FFC107;">
-                            <h5><i class="fas fa-clock"></i> Factor de Antigüedad y Eficiencia Temporal:</h5>
-                            <p><strong>Tiempo Objetivo:</strong> 24 meses (2 años) para cerrar un proyecto exitoso desde su fecha de inicio.</p>
-                            <p>Los proyectos se evalúan según su eficiencia temporal:</p>
-                            <ul>
-                                <li><strong>Proyectos que cerraron en ≤24 meses:</strong> Excelente desempeño (score alto: 0.7-1.0)</li>
-                                <li><strong>Proyectos que cerraron en 24-36 meses:</strong> Aceptable (score medio-alto: 0.5-0.7)</li>
-                                <li><strong>Proyectos que cerraron/tomarán 36-48 meses:</strong> Problemático (score medio: 0.3-0.5)</li>
-                                <li><strong>Proyectos que tomarán >48 meses:</strong> Muy problemático (score bajo: 0.1-0.3)</li>
-                                <li><strong>Proyectos inactivos:</strong> Si ya se vendió todo (Unidades_Disponibles = 0), el tiempo de cierre es solo el tiempo desde inicio hasta que se vendió todo</li>
-                                <li><strong>Proyectos activos:</strong> El tiempo de cierre se calcula como: meses desde inicio + meses para agotar inventario</li>
-                                <li><strong>Penalización adicional:</strong> Proyectos activos con más de 2 años desde inicio y menos del 50% vendido reciben penalización adicional</li>
-                            </ul>
-                            <p><strong>Ejemplo:</strong> Un proyecto que lleva 5 años activo y solo ha vendido el 50% de sus unidades claramente tiene problemas de flujo de caja y no es exitoso, aunque tenga buenas ventas recientes.</p>
-                        </div>
-                        
-                        <div class="classification-detail" style="margin-top: 1rem;">
-                            <h5>Método de Clasificación:</h5>
-                            <p>La clasificación utiliza un <strong>Score Compuesto Ponderado</strong> que combina todas las variables anteriores. Los proyectos se comparan dentro de su segmento (misma Zona, Estrato y Tipo VIS) para asegurar comparaciones justas.</p>
-                            <p><strong>Rangos de Clasificación:</strong></p>
-                            <ul>
-                                <li><strong>Exitoso:</strong> Score 0.62 - 0.79 (≥67% del score compuesto)</li>
-                                <li><strong>Moderado:</strong> Score 0.50 - 0.62 (33% - 67% del score compuesto)</li>
-                                <li><strong>Mejorable:</strong> Score 0.21 - 0.50 (<33% del score compuesto)</li>
-                            </ul>
-                        </div>
-                        
-                        <p><strong>Nota:</strong> La clasificación se realiza por segmentos (Zona/Estrato/Tipo VIS) para asegurar comparaciones justas entre proyectos similares. Las amenidades se extraen de la columna "Otros" separadas por comas.</p>
                     </div>
                 </details>
             </div>
@@ -282,48 +420,102 @@
                     <div id="map">
                         <!-- Toolbar de controles del mapa -->
                         <div class="map-controls-toolbar" id="map-controls-toolbar" role="toolbar" aria-label="Controles del mapa">
-                        <div class="map-control-group">
-                            <label for="map-style-select" class="map-control-label">
-                                <i class="fas fa-layer-group"></i> Estilo
-                            </label>
-                            <select id="map-style-select" class="map-control-select" aria-label="Seleccionar estilo de mapa">
-                                <option value="satellite">Satélite</option>
-                                <option value="streets">Calles</option>
-                                <option value="terrain">Terreno</option>
-                                <option value="light">Claro</option>
-                                <option value="dark">Oscuro</option>
-                            </select>
-                        </div>
-                        
-                        <div class="map-control-group">
-                            <button id="center-data-btn" class="map-control-btn" aria-label="Centrar mapa en todos los proyectos" title="Centrar datos">
-                                <i class="fas fa-crosshairs"></i> Centrar
-                            </button>
-                        </div>
-                        
-                        <div class="map-control-group">
-                            <label class="map-control-checkbox-label">
-                                <input type="checkbox" id="cluster-toggle" class="map-control-checkbox" aria-checked="true" aria-label="Activar o desactivar agrupamiento de marcadores">
-                                <span class="checkbox-custom"></span>
-                                <span class="checkbox-label">Clústeres</span>
-                            </label>
-                        </div>
-                        
-                        <div class="map-control-group">
-                            <label class="map-control-checkbox-label">
-                                <input type="checkbox" id="heatmap-toggle" class="map-control-checkbox" aria-checked="false" aria-label="Activar o desactivar mapa de calor por precio">
-                                <span class="checkbox-custom"></span>
-                                <span class="checkbox-label">Calor</span>
-                            </label>
-                        </div>
-                        
-                        <div class="map-control-group">
-                            <label class="map-control-checkbox-label">
-                                <input type="checkbox" id="markers-toggle" class="map-control-checkbox" aria-checked="true" aria-label="Activar o desactivar marcadores de proyectos">
-                                <span class="checkbox-custom"></span>
-                                <span class="checkbox-label">Marcadores</span>
-                            </label>
-                        </div>
+                            <div class="toolbar-header">
+                                <i class="fas fa-sliders-h"></i>
+                                <span>Controles</span>
+                                <button class="toolbar-toggle" id="toolbar-toggle" aria-label="Colapsar/Expandir toolbar" title="Colapsar">
+                                    <i class="fas fa-chevron-up"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="toolbar-content" id="toolbar-content">
+                                <div class="map-control-group">
+                                    <label for="map-style-select" class="map-control-label">
+                                        <i class="fas fa-layer-group"></i>
+                                        <span>Estilo de Mapa</span>
+                                    </label>
+                                    <div class="select-wrapper">
+                                        <select id="map-style-select" class="map-control-select" aria-label="Seleccionar estilo de mapa">
+                                            <option value="satellite">🛰️ Satélite</option>
+                                            <option value="streets">🛣️ Calles</option>
+                                            <option value="terrain">⛰️ Terreno</option>
+                                            <option value="light">☀️ Claro</option>
+                                            <option value="dark">🌙 Oscuro</option>
+                                        </select>
+                                        <i class="fas fa-chevron-down select-arrow"></i>
+                                    </div>
+                                </div>
+                                
+                                <div class="map-control-group">
+                                    <label for="marker-color-select" class="map-control-label">
+                                        <i class="fas fa-palette"></i>
+                                        <span>Color por</span>
+                                    </label>
+                                    <div class="select-wrapper">
+                                        <select id="marker-color-select" class="map-control-select" aria-label="Seleccionar criterio de color para marcadores">
+                                            <option value="clasificacion">📊 Clasificación</option>
+                                            <option value="vende">👤 Vendedor</option>
+                                            <option value="año">📅 Año</option>
+                                            <option value="zona">🗺️ Zona</option>
+                                            <option value="barrio">🏘️ Barrio</option>
+                                        </select>
+                                        <i class="fas fa-chevron-down select-arrow"></i>
+                                    </div>
+                                </div>
+                                
+                                <div class="map-control-group">
+                                    <button id="center-data-btn" class="map-control-btn" aria-label="Centrar mapa en todos los proyectos" title="Centrar datos">
+                                        <i class="fas fa-crosshairs"></i>
+                                        <span>Centrar Datos</span>
+                                    </button>
+                                </div>
+                                
+                                <div class="toolbar-divider"></div>
+                                
+                                <div class="map-control-group">
+                                    <span class="control-group-title">Capas</span>
+                                    <div class="toggle-controls">
+                                        <label class="map-control-checkbox-label">
+                                            <input type="checkbox" id="cluster-toggle" class="map-control-checkbox" aria-checked="true" aria-label="Activar o desactivar agrupamiento de marcadores">
+                                            <span class="checkbox-custom">
+                                                <span class="checkbox-checkmark">
+                                                    <i class="fas fa-check"></i>
+                                                </span>
+                                            </span>
+                                            <span class="checkbox-label">
+                                                <i class="fas fa-object-group"></i>
+                                                <span>Clústeres</span>
+                                            </span>
+                                        </label>
+                                        
+                                        <label class="map-control-checkbox-label">
+                                            <input type="checkbox" id="heatmap-toggle" class="map-control-checkbox" aria-checked="false" aria-label="Activar o desactivar mapa de calor por precio">
+                                            <span class="checkbox-custom">
+                                                <span class="checkbox-checkmark">
+                                                    <i class="fas fa-check"></i>
+                                                </span>
+                                            </span>
+                                            <span class="checkbox-label">
+                                                <i class="fas fa-fire"></i>
+                                                <span>Mapa de Calor</span>
+                                            </span>
+                                        </label>
+                                        
+                                        <label class="map-control-checkbox-label">
+                                            <input type="checkbox" id="markers-toggle" class="map-control-checkbox" aria-checked="true" aria-label="Activar o desactivar marcadores de proyectos">
+                                            <span class="checkbox-custom">
+                                                <span class="checkbox-checkmark">
+                                                    <i class="fas fa-check"></i>
+                                                </span>
+                                            </span>
+                                            <span class="checkbox-label">
+                                                <i class="fas fa-map-marker-alt"></i>
+                                                <span>Marcadores</span>
+                                            </span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         
                         <!-- Leyenda del heatmap -->
@@ -352,7 +544,38 @@
                             Normalización: P5-P95
                         </p>
                     </div>
+                    
                     </div> <!-- Cierre de #map -->
+                </div>
+                
+                <!-- Panel de Vista Previa 360° -->
+                <div class="street-preview-panel" id="street-preview-panel" style="display: none;" role="region" aria-label="Vista previa 360°" aria-expanded="false">
+                    <div class="street-preview-header">
+                        <h3><i class="fas fa-street-view"></i> Vista Previa 360°</h3>
+                        <button class="street-preview-close" id="street-preview-close" aria-label="Cerrar vista previa" title="Cerrar">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="street-preview-content">
+                        <!-- Contenedor del viewer de Mapillary -->
+                        <div id="mly" style="height: 400px; display: none; border-radius: 8px; overflow: hidden; background: #000;"></div>
+                        
+                        <!-- Mensaje de carga -->
+                        <div id="street-loading" style="display: none; padding: 2rem; text-align: center; color: #666;">
+                            <i class="fas fa-spinner fa-spin" style="font-size: 2rem; margin-bottom: 1rem;"></i>
+                            <p>Cargando vista 360°...</p>
+                        </div>
+                        
+                        <!-- Mensaje sin cobertura -->
+                        <div id="no360" style="display: none; padding: 1.5rem; border: 1px solid #ddd; border-radius: 8px; background: #f8f9fa;">
+                            <p style="margin-bottom: 1rem; color: #666;">
+                                <i class="fas fa-info-circle"></i> Sin cobertura 360° cercana para este proyecto.
+                            </p>
+                            <button id="btn-maps" class="btn-google-maps" aria-label="Abrir en Google Maps">
+                                <i class="fab fa-google"></i> Abrir en Google Maps
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Ranking de Constructores -->
@@ -482,6 +705,16 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <!-- Leaflet Heat JS -->
     <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.min.js"></script>
+    
+    <!-- Configuración de Mapillary Token (debe estar antes de street-preview.js) -->
+    <script>
+        // Token de Mapillary - puede ser configurado desde el servidor
+        window.MAPILLARY_TOKEN = '{{ mapillary_token|default("MLY|YOUR_TOKEN_HERE") }}';
+        console.log('[street] Token configurado:', window.MAPILLARY_TOKEN ? 'Sí' : 'No');
+    </script>
+    
+    <!-- Módulo de vista previa 360° -->
+    <script src="{{ url_for('static', filename='js/street-preview.js') }}"></script>
     
     <!-- JavaScript personalizado -->
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

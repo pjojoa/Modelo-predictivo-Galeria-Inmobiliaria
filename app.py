@@ -160,7 +160,7 @@ def apply_filters(df, clasificacion, zona, barrio, tipo_vis, precio_min, precio_
                 precio_mask &= (df['Precio_Promedio'] <= precio_max_val)
             except (ValueError, TypeError):
                 pass
-        
+    
         mask &= precio_mask
     
     return df[mask]
@@ -600,6 +600,79 @@ def proyecto_to_dict(row):
     if vende in ('nan', '', 'none', 'None'):
         vende = 'N/A'
     
+    # Extraer año de fecha de inicio
+    # Los últimos 2 dígitos indican el año desde 2000 (00 = 2000, 23 = 2023, etc.)
+    año = None
+    fecha_inicio = row.get('Fecha_Inicio', None)
+    if pd.notna(fecha_inicio):
+        try:
+            # Intentar parsear como datetime
+            if isinstance(fecha_inicio, str):
+                from datetime import datetime
+                # Intentar diferentes formatos comunes
+                for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%Y/%m/%d', '%d-%m-%Y', '%Y-%d-%m', '%d/%m/%y', '%y-%m-%d']:
+                    try:
+                        fecha_inicio = datetime.strptime(fecha_inicio, fmt)
+                        break
+                    except:
+                        continue
+            # Si es datetime o Timestamp, extraer año
+            if hasattr(fecha_inicio, 'year'):
+                año_completo = int(fecha_inicio.year)
+                # Si el año es menor a 100, asumir que son los últimos 2 dígitos desde 2000
+                if año_completo < 100:
+                    año = 2000 + año_completo
+                else:
+                    año = año_completo
+            elif isinstance(fecha_inicio, pd.Timestamp):
+                año_completo = int(fecha_inicio.year)
+                if año_completo < 100:
+                    año = 2000 + año_completo
+                else:
+                    año = año_completo
+        except:
+            # Si falla, intentar extraer año de string
+            try:
+                fecha_str = str(fecha_inicio).strip()
+                # Buscar los últimos 2 dígitos que podrían ser el año
+                # Intentar diferentes patrones
+                import re
+                # Buscar patrón de 2 dígitos al final o en formato de fecha
+                patrones = [
+                    r'(\d{2})$',  # Últimos 2 dígitos
+                    r'/(\d{2})$',  # Últimos 2 dígitos después de /
+                    r'-(\d{2})$',  # Últimos 2 dígitos después de -
+                    r'(\d{4})$',  # Últimos 4 dígitos (año completo)
+                ]
+                
+                año_encontrado = None
+                for patron in patrones:
+                    match = re.search(patron, fecha_str)
+                    if match:
+                        año_str = match.group(1)
+                        if año_str.isdigit():
+                            año_num = int(año_str)
+                            # Si son 2 dígitos, asumir desde 2000
+                            if len(año_str) == 2:
+                                año_encontrado = 2000 + año_num
+                            elif len(año_str) == 4:
+                                año_encontrado = año_num
+                            break
+                
+                if año_encontrado:
+                    año = año_encontrado
+                else:
+                    # Fallback: intentar los primeros 4 dígitos
+                    año_str = fecha_str[:4]
+                    if año_str.isdigit():
+                        año_num = int(año_str)
+                        if año_num < 100:
+                            año = 2000 + año_num
+                        else:
+                            año = año_num
+            except:
+                año = None
+    
     # Pre-calcular valores para evitar múltiples accesos
     precio = row.get('Precio_Promedio', 0)
     lat = row.get('Lat', 0)
@@ -616,6 +689,7 @@ def proyecto_to_dict(row):
         'zona': str(row.get('Zona', 'N/A')),
         'estrato': str(row.get('Estrato', 'N/A')) if pd.notna(row.get('Estrato')) and pd.to_numeric(row.get('Estrato', 0), errors='coerce') != 0 else 'N/A',
         'vende': vende,
+        'año': año if año else None,
         'precio_promedio': float(precio) if pd.notna(precio) else 0,
         'precio_formateado': format_currency(precio),
         'area_promedio': float(row.get('Area_Promedio', 0)) if pd.notna(row.get('Area_Promedio')) else 0,
@@ -735,7 +809,10 @@ def get_filtros_options():
 @app.route('/')
 def index():
     """Página principal."""
-    return render_template('index.html')
+    # Obtener token de Mapillary desde variables de entorno o usar valor por defecto
+    import os
+    mapillary_token = os.getenv('MAPILLARY_TOKEN', 'MLY|YOUR_TOKEN_HERE')
+    return render_template('index.html', mapillary_token=mapillary_token)
 
 @app.route('/api/diagnostico')
 def diagnostico():
