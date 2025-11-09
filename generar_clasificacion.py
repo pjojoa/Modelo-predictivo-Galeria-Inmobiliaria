@@ -424,6 +424,8 @@ def detectar_columnas_proyectos(ds):
     col_fecha_ini = next((c for c in ds.columns if 'fecha inicio' in c.lower()), None)
     col_coordenadas = next((c for c in ds.columns if 'coordenadas' in c.lower()), None)
     col_direccion = next((c for c in ds.columns if 'dirección' in c.lower() or 'direccion' in c.lower()), None)
+    col_otros = next((c for c in ds.columns if c.lower().strip() == 'otros'), None)
+    col_constructor = next((c for c in ds.columns if 'constructor' in c.lower() or 'constructora' in c.lower()), None)
     
     return {
         'un_disp': col_un_disp,
@@ -441,7 +443,9 @@ def detectar_columnas_proyectos(ds):
         'nombre': col_nombre,
         'fecha_ini': col_fecha_ini,
         'coordenadas': col_coordenadas,
-        'direccion': col_direccion
+        'direccion': col_direccion,
+        'otros': col_otros,
+        'constructor': col_constructor
     }
 
 def calcular_velocidad(pry, cols):
@@ -1236,6 +1240,73 @@ def clasificar_proyectos_por_segmento(ds, cols_proy):
         else:
             mediana_tamano_seg = 0
         
+        # Calcular métricas de precio/m²
+        precio_m2_col = cols_proy.get('precio_m2', '')
+        precio_m2_col_num = precio_m2_col + "_num" if (precio_m2_col + "_num") in valid_segmento.columns else precio_m2_col
+        if precio_m2_col_num in valid_segmento.columns:
+            precio_m2_seg = pd.to_numeric(valid_segmento[precio_m2_col_num], errors='coerce')
+            precio_m2_seg_valido = precio_m2_seg[precio_m2_seg > 0]
+            if len(precio_m2_seg_valido) > 0:
+                mediana_precio_m2_seg = precio_m2_seg_valido.median()
+                p75_precio_m2_seg = precio_m2_seg_valido.quantile(0.75)
+                p25_precio_m2_seg = precio_m2_seg_valido.quantile(0.25)
+            else:
+                mediana_precio_m2_seg = 0
+                p75_precio_m2_seg = 0
+                p25_precio_m2_seg = 0
+        else:
+            mediana_precio_m2_seg = 0
+            p75_precio_m2_seg = 0
+            p25_precio_m2_seg = 0
+        
+        # Calcular métricas de área promedio
+        area_p_col = cols_proy.get('area_p', '')
+        area_p_col_num = area_p_col + "_num" if (area_p_col + "_num") in valid_segmento.columns else area_p_col
+        if area_p_col_num in valid_segmento.columns:
+            area_seg = pd.to_numeric(valid_segmento[area_p_col_num], errors='coerce')
+            area_seg_valido = area_seg[area_seg > 0]
+            if len(area_seg_valido) > 0:
+                mediana_area_seg = area_seg_valido.median()
+            else:
+                mediana_area_seg = 0
+        else:
+            mediana_area_seg = 0
+        
+        # Calcular métricas de características de inmuebles (alcobas, baños, garajes)
+        # Buscar columnas agregadas de inmuebles
+        alcobas_col = None
+        banos_col = None
+        garajes_col = None
+        for col in valid_segmento.columns:
+            if 'alcoba' in col.lower() and ('median' in col.lower() or 'mean' in col.lower()):
+                alcobas_col = col
+            if ('bano' in col.lower() or 'baño' in col.lower()) and ('median' in col.lower() or 'mean' in col.lower()):
+                banos_col = col
+            if 'garaje' in col.lower() and ('median' in col.lower() or 'mean' in col.lower()):
+                garajes_col = col
+        
+        # Calcular métricas de amenidades (número de amenidades por proyecto)
+        col_otros = cols_proy.get('otros', '')
+        num_amenidades_seg = []
+        if col_otros and col_otros in valid_segmento.columns:
+            for idx in valid_segmento.index:
+                otros_val = valid_segmento.loc[idx, col_otros]
+                if pd.notna(otros_val) and str(otros_val).strip():
+                    otros_str = str(otros_val).strip()
+                    amenidades = [a.strip() for a in otros_str.split(',') if a.strip()]
+                    num_amenidades_seg.append(len(amenidades))
+                else:
+                    num_amenidades_seg.append(0)
+        
+        if num_amenidades_seg:
+            mediana_num_amenidades_seg = pd.Series(num_amenidades_seg).median()
+            p75_num_amenidades_seg = pd.Series(num_amenidades_seg).quantile(0.75)
+            p25_num_amenidades_seg = pd.Series(num_amenidades_seg).quantile(0.25)
+        else:
+            mediana_num_amenidades_seg = 0
+            p75_num_amenidades_seg = 0
+            p25_num_amenidades_seg = 0
+        
         # Clasificar proyectos del segmento considerando múltiples variables
         for idx in ds_segmento[valid_mask].index:
             meses = pd.to_numeric(ds_segmento.loc[idx, 'meses_para_agotar'], errors='coerce')
@@ -1289,7 +1360,128 @@ def clasificar_proyectos_por_segmento(ds, cols_proy):
             else:
                 score_tamano = 0.5
             
-            # 5. Score de patrón de ventas - PESO 5%
+            # 5. Score de precio/m² (posición competitiva) - PESO 8%
+            # Precios competitivos (no demasiado altos ni demasiado bajos) son mejores
+            if precio_m2_col_num in ds_segmento.columns:
+                precio_m2 = pd.to_numeric(ds_segmento.loc[idx, precio_m2_col_num], errors='coerce')
+                if pd.notna(precio_m2) and precio_m2 > 0:
+                    if mediana_precio_m2_seg > 0:
+                        # Proyectos con precio cerca de la mediana del segmento son mejores
+                        ratio_precio = precio_m2 / mediana_precio_m2_seg
+                        if 0.85 <= ratio_precio <= 1.15:  # Entre 85% y 115% de la mediana
+                            score_precio_m2 = 1.0  # Precio competitivo
+                        elif 0.70 <= ratio_precio < 0.85 or 1.15 < ratio_precio <= 1.30:
+                            score_precio_m2 = 0.7  # Precio aceptable
+                        elif ratio_precio < 0.70:
+                            score_precio_m2 = 0.4  # Muy barato (puede indicar baja calidad)
+                        else:
+                            score_precio_m2 = 0.3  # Muy caro (puede limitar ventas)
+                    else:
+                        score_precio_m2 = 0.5
+                else:
+                    score_precio_m2 = 0.5
+            else:
+                score_precio_m2 = 0.5
+            
+            # 6. Score de área promedio - PESO 5%
+            # Áreas medias (60-100 m²) tienden a ser más exitosas
+            if area_p_col_num in ds_segmento.columns:
+                area = pd.to_numeric(ds_segmento.loc[idx, area_p_col_num], errors='coerce')
+                if pd.notna(area) and area > 0:
+                    if 60 <= area <= 100:
+                        score_area = 1.0  # Área óptima
+                    elif 45 <= area < 60 or 100 < area <= 120:
+                        score_area = 0.8  # Área aceptable
+                    elif area < 45:
+                        score_area = 0.6  # Muy pequeña
+                    else:
+                        score_area = 0.7  # Muy grande
+                else:
+                    score_area = 0.5
+            else:
+                score_area = 0.5
+            
+            # 7. Score de características de inmuebles (alcobas, baños, garajes) - PESO 4%
+            score_caracteristicas = 0.5
+            num_caracteristicas = 0
+            suma_scores = 0
+            
+            # Alcobas: 2-3 alcobas son óptimas
+            if alcobas_col and alcobas_col in ds_segmento.columns:
+                alcobas = pd.to_numeric(ds_segmento.loc[idx, alcobas_col], errors='coerce')
+                if pd.notna(alcobas) and alcobas > 0:
+                    num_caracteristicas += 1
+                    if 2 <= alcobas <= 3:
+                        suma_scores += 1.0
+                    elif 1 <= alcobas < 2 or 3 < alcobas <= 4:
+                        suma_scores += 0.7
+                    else:
+                        suma_scores += 0.5
+            
+            # Baños: 2-3 baños son óptimos
+            if banos_col and banos_col in ds_segmento.columns:
+                banos = pd.to_numeric(ds_segmento.loc[idx, banos_col], errors='coerce')
+                if pd.notna(banos) and banos > 0:
+                    num_caracteristicas += 1
+                    if 2 <= banos <= 3:
+                        suma_scores += 1.0
+                    elif 1 <= banos < 2 or 3 < banos <= 4:
+                        suma_scores += 0.7
+                    else:
+                        suma_scores += 0.5
+            
+            # Garajes: 1-2 garajes son óptimos
+            if garajes_col and garajes_col in ds_segmento.columns:
+                garajes = pd.to_numeric(ds_segmento.loc[idx, garajes_col], errors='coerce')
+                if pd.notna(garajes) and garajes >= 0:
+                    num_caracteristicas += 1
+                    if 1 <= garajes <= 2:
+                        suma_scores += 1.0
+                    elif garajes == 0 or garajes == 3:
+                        suma_scores += 0.6
+                    else:
+                        suma_scores += 0.4
+            
+            if num_caracteristicas > 0:
+                score_caracteristicas = suma_scores / num_caracteristicas
+            else:
+                score_caracteristicas = 0.5
+            
+            # 8. Score de número de amenidades - PESO 3%
+            # Proyectos con más amenidades tienden a ser más exitosos
+            if col_otros and col_otros in ds_segmento.columns:
+                otros_val = ds_segmento.loc[idx, col_otros]
+                if pd.notna(otros_val) and str(otros_val).strip():
+                    otros_str = str(otros_val).strip()
+                    amenidades = [a.strip() for a in otros_str.split(',') if a.strip()]
+                    num_amenidades = len(amenidades)
+                else:
+                    num_amenidades = 0
+                
+                if mediana_num_amenidades_seg > 0:
+                    # Normalizar respecto a la mediana del segmento
+                    if num_amenidades >= mediana_num_amenidades_seg * 1.5:
+                        score_amenidades = 1.0  # Muchas amenidades
+                    elif num_amenidades >= mediana_num_amenidades_seg:
+                        score_amenidades = 0.8  # Amenidades promedio-alto
+                    elif num_amenidades >= mediana_num_amenidades_seg * 0.5:
+                        score_amenidades = 0.6  # Amenidades promedio-bajo
+                    else:
+                        score_amenidades = 0.3  # Pocas amenidades
+                else:
+                    # Si no hay mediana, usar valores absolutos
+                    if num_amenidades >= 10:
+                        score_amenidades = 1.0
+                    elif num_amenidades >= 5:
+                        score_amenidades = 0.7
+                    elif num_amenidades >= 2:
+                        score_amenidades = 0.5
+                    else:
+                        score_amenidades = 0.3
+            else:
+                score_amenidades = 0.5
+            
+            # 9. Score de patrón de ventas - PESO 2%
             patron = str(ds_segmento.loc[idx, 'Patron_Ventas'] if 'Patron_Ventas' in ds_segmento.columns else 'Sin datos')
             if 'Acelerado' in patron:
                 score_patron = 1.0
@@ -1300,13 +1492,90 @@ def clasificar_proyectos_por_segmento(ds, cols_proy):
             else:
                 score_patron = 0.5
             
-            # Score compuesto ponderado
+            # 10. Score de antigüedad del proyecto y eficiencia temporal - PESO 10%
+            # TIEMPO OBJETIVO: 24 meses (2 años) para cerrar un proyecto exitoso
+            # Si el proyecto está inactivo (Unidades_Disponibles = 0), el tiempo total es solo meses_desde_inicio
+            # Si el proyecto está activo, el tiempo total es meses_desde_inicio + meses_para_agotar
+            score_antiguedad = 1.0  # Por defecto, no hay penalización
+            meses_desde_inicio = pd.to_numeric(ds_segmento.loc[idx, 'meses_desde_inicio'] if 'meses_desde_inicio' in ds_segmento.columns else 0, errors='coerce')
+            meses_para_agotar = pd.to_numeric(ds_segmento.loc[idx, 'meses_para_agotar'] if 'meses_para_agotar' in ds_segmento.columns else 0, errors='coerce')
+            porcentaje_vendido = pd.to_numeric(ds_segmento.loc[idx, '_porcentaje_vendido_feat'] if '_porcentaje_vendido_feat' in ds_segmento.columns else 0, errors='coerce')
+            
+            # Verificar si el proyecto está activo o inactivo
+            un_disp_col = cols_proy.get('un_disp', '')
+            un_disp_col_num = un_disp_col + "_num" if (un_disp_col + "_num") in ds_segmento.columns else un_disp_col
+            unidades_disponibles = 0
+            proyecto_activo = True  # Por defecto, asumir activo
+            
+            if un_disp_col_num and un_disp_col_num in ds_segmento.columns:
+                unidades_disponibles = pd.to_numeric(ds_segmento.loc[idx, un_disp_col_num], errors='coerce')
+                if pd.notna(unidades_disponibles):
+                    proyecto_activo = unidades_disponibles > 0
+                else:
+                    proyecto_activo = True  # Si no se puede determinar, asumir activo
+            
+            TIEMPO_OBJETIVO_MESES = 24  # 2 años es el tiempo objetivo para cerrar un proyecto exitoso
+            
+            if pd.notna(meses_desde_inicio) and meses_desde_inicio >= 0:
+                # Calcular tiempo total para cerrar el proyecto
+                if not proyecto_activo:
+                    # Proyecto inactivo: ya se vendió todo, el tiempo total es solo meses_desde_inicio
+                    tiempo_total_cierre = meses_desde_inicio
+                else:
+                    # Proyecto activo: tiempo total = meses desde inicio + meses para agotar
+                    tiempo_total_cierre = meses_desde_inicio + (meses_para_agotar if pd.notna(meses_para_agotar) and meses_para_agotar > 0 else 0)
+                
+                # Evaluar eficiencia temporal basada en tiempo objetivo de 24 meses
+                if pd.notna(tiempo_total_cierre) and tiempo_total_cierre > 0:
+                    # Proyectos que cerraron/completaron en menos de 24 meses: excelente (score alto)
+                    if tiempo_total_cierre <= TIEMPO_OBJETIVO_MESES:
+                        # Recompensar proyectos que cerraron rápido
+                        ratio_tiempo = tiempo_total_cierre / TIEMPO_OBJETIVO_MESES  # 0 a 1
+                        score_antiguedad = 1.0 - (ratio_tiempo * 0.3)  # Entre 0.7 y 1.0 (mejor si cerró más rápido)
+                    # Proyectos que tomarán/ tomaron entre 24 y 36 meses: aceptable (score medio-alto)
+                    elif tiempo_total_cierre <= 36:  # Hasta 3 años
+                        # Penalización leve por exceder el tiempo objetivo
+                        exceso_tiempo = tiempo_total_cierre - TIEMPO_OBJETIVO_MESES  # 0 a 12 meses
+                        factor_penalizacion = exceso_tiempo / 12.0  # 0 a 1
+                        score_antiguedad = 0.7 - (factor_penalizacion * 0.2)  # Entre 0.5 y 0.7
+                    # Proyectos que tomarán/ tomaron entre 36 y 48 meses: problemático (score medio)
+                    elif tiempo_total_cierre <= 48:  # Hasta 4 años
+                        exceso_tiempo = tiempo_total_cierre - TIEMPO_OBJETIVO_MESES  # 12 a 24 meses
+                        factor_penalizacion = min(1.0, exceso_tiempo / 24.0)  # 0.5 a 1.0
+                        score_antiguedad = 0.5 - (factor_penalizacion * 0.2)  # Entre 0.3 y 0.5
+                    # Proyectos que tomarán/ tomaron más de 48 meses: muy problemático (score bajo)
+                    else:  # Más de 4 años
+                        exceso_tiempo = tiempo_total_cierre - TIEMPO_OBJETIVO_MESES  # Más de 24 meses
+                        factor_penalizacion = min(1.0, exceso_tiempo / 48.0)  # Puede exceder 1.0
+                        score_antiguedad = max(0.1, 0.3 - (factor_penalizacion * 0.2))  # Entre 0.1 y 0.3
+                    
+                    # Penalización adicional para proyectos activos antiguos con bajo porcentaje vendido
+                    if proyecto_activo and pd.notna(porcentaje_vendido):
+                        # Si el proyecto está activo y ha pasado mucho tiempo desde inicio con bajo % vendido
+                        if meses_desde_inicio > TIEMPO_OBJETIVO_MESES and porcentaje_vendido < 50:
+                            # Penalización adicional: proyectos activos que llevan más de 2 años con menos del 50% vendido
+                            factor_penalizacion_adicional = (TIEMPO_OBJETIVO_MESES - porcentaje_vendido) / TIEMPO_OBJETIVO_MESES
+                            score_antiguedad = score_antiguedad * (1.0 - factor_penalizacion_adicional * 0.3)  # Reducir hasta 30%
+                        elif meses_desde_inicio > 36 and porcentaje_vendido < 70:
+                            # Proyectos activos con más de 3 años y menos del 70% vendido
+                            factor_penalizacion_adicional = (70 - porcentaje_vendido) / 70.0
+                            score_antiguedad = score_antiguedad * (1.0 - factor_penalizacion_adicional * 0.2)  # Reducir hasta 20%
+                
+                # Asegurar que score_antiguedad esté en rango válido
+                score_antiguedad = max(0.0, min(1.0, score_antiguedad))
+            
+            # Score compuesto ponderado MEJORADO con penalización por antigüedad
             score_compuesto = (
-                score_velocidad * 0.40 +      # Meses para agotar (invertido)
-                score_vel_ventas * 0.25 +     # Velocidad de ventas
-                score_porcentaje * 0.20 +     # Porcentaje vendido
-                score_tamano * 0.10 +         # Tamaño del proyecto
-                score_patron * 0.05           # Patrón de ventas
+                score_velocidad * 0.30 +      # Meses para agotar (invertido) - Reducido de 35% a 30%
+                score_vel_ventas * 0.18 +     # Velocidad de ventas - Reducido de 20% a 18%
+                score_porcentaje * 0.12 +     # Porcentaje vendido - Reducido de 15% a 12%
+                score_antiguedad * 0.10 +     # Antigüedad y eficiencia temporal (NUEVO) - 10%
+                score_tamano * 0.07 +         # Tamaño del proyecto - Reducido de 8% a 7%
+                score_precio_m2 * 0.07 +      # Precio/m² - Reducido de 8% a 7%
+                score_area * 0.05 +           # Área promedio - 5%
+                score_caracteristicas * 0.04 + # Características inmuebles - 4%
+                score_amenidades * 0.03 +     # Número de amenidades - 3%
+                score_patron * 0.02           # Patrón de ventas - 2%
             )
             
             # Clasificación basada en score compuesto
@@ -1600,6 +1869,20 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
     print("=" * 70)
     print()
     
+    # VALIDACIÓN CRÍTICA: Verificar que proj_ds no esté vacío
+    if proj_ds is None or proj_ds.empty:
+        print("❌ ERROR CRÍTICO: proj_ds está vacío o es None")
+        print(f"  Tipo de proj_ds: {type(proj_ds)}")
+        if proj_ds is not None:
+            print(f"  Tamaño de proj_ds: {len(proj_ds)}")
+            print(f"  Columnas en proj_ds: {list(proj_ds.columns)}")
+        return pd.DataFrame()
+    
+    print(f"  ✓ proj_ds recibido: {len(proj_ds)} proyectos")
+    print(f"  ✓ Columnas en proj_ds: {len(proj_ds.columns)}")
+    print(f"  ✓ Primeras columnas: {list(proj_ds.columns[:10])}")
+    print()
+    
     resultado = pd.DataFrame()
     
     # Código y nombre del proyecto
@@ -1625,14 +1908,27 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
                     break
     
     if key_para_codigo:
+        print(f"  ✓ Usando columna de código: {key_para_codigo}")
         resultado['Codigo_Proyecto'] = proj_ds[key_para_codigo].astype(str)
     else:
         # Último recurso: usar el índice
+        print(f"  ⚠ No se encontró columna de código, usando índice")
         resultado['Codigo_Proyecto'] = proj_ds.index.astype(str)
     
-    if cols_proy['nombre'] and cols_proy['nombre'] in proj_ds.columns:
+    # VALIDACIÓN: Verificar que se creó la primera columna correctamente
+    if len(resultado) == 0:
+        print("❌ ERROR: No se pudo crear la columna Codigo_Proyecto")
+        print(f"  Tamaño de proj_ds: {len(proj_ds)}")
+        print(f"  key_para_codigo: {key_para_codigo}")
+        return pd.DataFrame()
+    
+    print(f"  ✓ Primera columna creada: Codigo_Proyecto ({len(resultado)} filas)")
+    
+    if cols_proy.get('nombre') and cols_proy['nombre'] in proj_ds.columns:
+        print(f"  ✓ Usando columna de nombre: {cols_proy['nombre']}")
         resultado['Proyecto'] = proj_ds[cols_proy['nombre']].astype(str)
     else:
+        print(f"  ⚠ No se encontró columna de nombre, usando código")
         resultado['Proyecto'] = resultado['Codigo_Proyecto']
     
     # Clasificación y score - GARANTIZAR que sean válidos
@@ -1751,6 +2047,50 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
     else:
         resultado['Coordenadas Reales'] = ''
     
+    # Constructor - Mejorar la extracción para obtener nombres textuales
+    constructor_col = None
+    if cols_proy.get('constructor') and cols_proy['constructor'] in proj_ds.columns:
+        constructor_col = cols_proy['constructor']
+    else:
+        # Buscar columna de constructor de forma flexible
+        for c in proj_ds.columns:
+            if 'constructor' in c.lower() or 'constructora' in c.lower():
+                constructor_col = c
+                break
+    
+    if constructor_col and constructor_col in proj_ds.columns:
+        # Convertir a string y limpiar
+        constructor_series = proj_ds[constructor_col].copy()
+        
+        # Si los valores son numéricos, intentar buscar una columna alternativa con nombres
+        # Primero verificar si hay valores textuales (no numéricos)
+        valores_textuales = constructor_series.astype(str).apply(
+            lambda x: x.strip() if pd.notna(x) and str(x).strip() != '' and not str(x).strip().replace('.', '').replace('-', '').isdigit() else None
+        )
+        
+        if valores_textuales.notna().any():
+            # Hay valores textuales, usar estos
+            resultado['Constructor'] = constructor_series.astype(str).apply(
+                lambda x: x.strip() if pd.notna(x) and str(x).strip() != '' else 'N/A'
+            )
+            # Limpiar valores numéricos que quedaron como "805026500.0"
+            resultado['Constructor'] = resultado['Constructor'].apply(
+                lambda x: x.rstrip('.0') if x.replace('.0', '').replace('-', '').isdigit() and x.endswith('.0') else x
+            )
+        else:
+            # Todos son numéricos, mantener pero limpiar el formato
+            resultado['Constructor'] = constructor_series.astype(str).apply(
+                lambda x: x.rstrip('.0') if pd.notna(x) and str(x).strip() != '' else 'N/A'
+            )
+            resultado['Constructor'] = resultado['Constructor'].apply(
+                lambda x: 'N/A' if x.replace('.', '').replace('-', '').isdigit() else x
+            )
+        
+        # Reemplazar valores inválidos
+        resultado['Constructor'] = resultado['Constructor'].replace(['nan', 'None', 'none', ''], 'N/A')
+    else:
+        resultado['Constructor'] = 'N/A'
+    
     # Tipo VIS (si está disponible)
     tipo_vis_col = None
     for c in proj_ds.columns:
@@ -1794,12 +2134,12 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
     
     # Asegurar tipos string correctos
     columnas_string = ['Codigo_Proyecto', 'Proyecto', 'Clasificacion', 'Zona', 'Barrio', 
-                       'Patron_Ventas', 'Coordenadas Reales', 'Tipo_VIS_Principal', 'Clasificacion_Compuesta']
+                       'Patron_Ventas', 'Coordenadas Reales', 'Tipo_VIS_Principal', 'Clasificacion_Compuesta', 'Constructor']
     for col in columnas_string:
         if col in resultado.columns:
             resultado[col] = resultado[col].astype(str)
             # Rellenar valores vacíos según la columna
-            if col in ['Zona', 'Barrio', 'Tipo_VIS_Principal']:
+            if col in ['Zona', 'Barrio', 'Tipo_VIS_Principal', 'Constructor']:
                 resultado[col] = resultado[col].replace(['', 'nan', 'None'], 'N/A')
             elif col == 'Patron_Ventas':
                 resultado[col] = resultado[col].replace(['', 'nan', 'None'], 'Sin datos')
@@ -1810,16 +2150,39 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
                 mask_invalida = ~resultado[col].isin(['Exitoso', 'Moderado', 'Mejorable'])
                 resultado.loc[mask_invalida, col] = 'Moderado'
     
+    # VALIDACIÓN FINAL: Verificar que el resultado no esté vacío
+    if resultado.empty:
+        print("❌ ERROR CRÍTICO: El DataFrame resultado está vacío después de generar todas las columnas")
+        print(f"  proj_ds tenía {len(proj_ds)} filas")
+        print(f"  Columnas en proj_ds: {list(proj_ds.columns)[:10]}...")
+        print(f"  Columnas en resultado: {list(resultado.columns)}")
+        return pd.DataFrame()
+    
+    # Asegurar que el índice del resultado coincida con el de proj_ds
+    if len(resultado) != len(proj_ds):
+        print(f"⚠ ADVERTENCIA: El resultado tiene {len(resultado)} filas pero proj_ds tenía {len(proj_ds)}")
+        print(f"  Esto puede indicar un problema en la creación de columnas")
+    
     # Mostrar resumen de columnas generadas
     print(f"[OK] Archivo final generado: {len(resultado)} proyectos")
     print(f"  Columnas ({len(resultado.columns)}): {list(resultado.columns)}")
+    print()
+    print(f"  Validación de datos:")
+    print(f"    - Total de proyectos: {len(resultado)}")
+    print(f"    - Proyectos con código: {resultado['Codigo_Proyecto'].notna().sum()}")
+    print(f"    - Proyectos con nombre: {resultado['Proyecto'].notna().sum()}")
+    print(f"    - Proyectos con clasificación: {resultado['Clasificacion'].notna().sum()}")
+    print(f"    - Proyectos con score: {resultado['Score_Exito'].notna().sum()}")
     print()
     print(f"  Tipos de datos:")
     for col in sorted(resultado.columns):
         dtype = resultado[col].dtype
         # Contar valores nulos/NaN
-        nulos = resultado[col].isna().sum() if pd.api.types.is_numeric_dtype(dtype) else (resultado[col] == '').sum() + (resultado[col] == 'N/A').sum()
-        print(f"    - {col:30s}: {str(dtype):15s} (nulos/vacios: {nulos})")
+        if pd.api.types.is_numeric_dtype(dtype):
+            nulos = resultado[col].isna().sum()
+        else:
+            nulos = (resultado[col] == '').sum() + (resultado[col] == 'N/A').sum() + (resultado[col].astype(str) == 'nan').sum()
+        print(f"    - {col:30s}: {str(dtype):15s} (nulos/vacios: {nulos}/{len(resultado)})")
     print()
     
     # Verificar clasificaciones
@@ -1830,11 +2193,173 @@ def generar_archivo_final(proj_ds, cols_proy, key_pry):
     
     # Verificar rangos de scores
     print(f"  Rangos de scores:")
-    print(f"    - Score_Exito: {resultado['Score_Exito'].min():.3f} - {resultado['Score_Exito'].max():.3f} (promedio: {resultado['Score_Exito'].mean():.3f})")
-    print(f"    - Score_Compuesto: {resultado['Score_Compuesto'].min():.3f} - {resultado['Score_Compuesto'].max():.3f} (promedio: {resultado['Score_Compuesto'].mean():.3f})")
+    if len(resultado) > 0:
+        print(f"    - Score_Exito: {resultado['Score_Exito'].min():.3f} - {resultado['Score_Exito'].max():.3f} (promedio: {resultado['Score_Exito'].mean():.3f})")
+        print(f"    - Score_Compuesto: {resultado['Score_Compuesto'].min():.3f} - {resultado['Score_Compuesto'].max():.3f} (promedio: {resultado['Score_Compuesto'].mean():.3f})")
+    else:
+        print("    - No hay datos para calcular rangos")
     print()
     
+    # Mostrar muestra de datos
+    if len(resultado) > 0:
+        print(f"  Muestra de datos (primeras 3 filas):")
+        print(resultado.head(3).to_string())
+        print()
+    
     return resultado
+
+# ============================================================================
+# ANÁLISIS DE AMENIDADES
+# ============================================================================
+
+def analizar_amenidades(ds, col_otros, mostrar_resultados=True):
+    """Analiza las amenidades de los proyectos desde la columna 'Otros'.
+    
+    Args:
+        ds: DataFrame con proyectos
+        col_otros: Nombre de la columna 'Otros' que contiene amenidades separadas por ','
+        mostrar_resultados: Si True, imprime los resultados (default: True)
+    
+    Returns:
+        dict: Diccionario con análisis de amenidades
+    """
+    try:
+        if not col_otros or col_otros not in ds.columns:
+            return {}
+        
+        if mostrar_resultados:
+            print("=" * 70)
+            print("  ANÁLISIS DE AMENIDADES")
+            print("=" * 70)
+            print()
+        
+        # Extraer todas las amenidades
+        todas_amenidades = []
+        proyectos_con_amenidades = 0
+        
+        for idx, row in ds.iterrows():
+            otros_val = row.get(col_otros)
+            if pd.notna(otros_val) and str(otros_val).strip():
+                otros_str = str(otros_val).strip()
+                # Separar por coma
+                amenidades = [a.strip() for a in otros_str.split(',') if a.strip()]
+                todas_amenidades.extend(amenidades)
+                if amenidades:
+                    proyectos_con_amenidades += 1
+        
+        if not todas_amenidades:
+            if mostrar_resultados:
+                print("  ⚠ No se encontraron amenidades en la columna 'Otros'")
+            return {}
+        
+        # Normalizar nombres de amenidades (minúsculas, sin espacios extra)
+        amenidades_normalizadas = [a.lower().strip() for a in todas_amenidades]
+        
+        # Contar frecuencia de cada amenidad
+        from collections import Counter
+        frecuencia_amenidades = Counter(amenidades_normalizadas)
+        
+        # Obtener las top amenidades
+        top_amenidades = frecuencia_amenidades.most_common(20)
+        
+        if mostrar_resultados:
+            print(f"  Total de amenidades encontradas: {len(todas_amenidades)}")
+            print(f"  Proyectos con amenidades: {proyectos_con_amenidades} de {len(ds)}")
+            print(f"  Amenidades únicas: {len(frecuencia_amenidades)}")
+            print()
+            print("  Top-20 amenidades más comunes:")
+            for amenidad, count in top_amenidades:
+                porcentaje = (count / proyectos_con_amenidades * 100) if proyectos_con_amenidades > 0 else 0
+                print(f"    - {amenidad}: {count} proyectos ({porcentaje:.1f}%)")
+            print()
+        
+        return {
+            'total_amenidades': len(todas_amenidades),
+            'proyectos_con_amenidades': proyectos_con_amenidades,
+            'amenidades_unicas': len(frecuencia_amenidades),
+            'frecuencia_amenidades': {k: int(v) for k, v in frecuencia_amenidades.items()},
+            'top_amenidades': {k: int(v) for k, v in top_amenidades}
+        }
+        
+    except Exception as e:
+        if mostrar_resultados:
+            print(f"⚠ Error al analizar amenidades: {str(e)}")
+            import traceback
+            traceback.print_exc()
+        return {}
+
+def analizar_amenidades_exitosos(ds, cols_proy):
+    """Analiza las amenidades más comunes en proyectos exitosos.
+    
+    Args:
+        ds: DataFrame con proyectos clasificados
+        cols_proy: Diccionario con columnas de proyectos
+    
+    Returns:
+        dict: Diccionario con amenidades de proyectos exitosos
+    """
+    try:
+        col_otros = cols_proy.get('otros')
+        if not col_otros or col_otros not in ds.columns:
+            return {}
+        
+        # Filtrar proyectos exitosos
+        exitosos = ds[ds['Clasificacion'] == 'Exitoso'].copy()
+        
+        if len(exitosos) == 0:
+            return {}
+        
+        # Analizar amenidades de proyectos exitosos (sin imprimir)
+        analisis_exitosos = analizar_amenidades(exitosos, col_otros, mostrar_resultados=False)
+        
+        # Comparar con todos los proyectos (sin imprimir)
+        analisis_total = analizar_amenidades(ds, col_otros, mostrar_resultados=False)
+        
+        # Calcular amenidades más frecuentes en exitosos vs. total
+        if analisis_exitosos and analisis_total:
+            frecuencia_exitosos = analisis_exitosos.get('frecuencia_amenidades', {})
+            frecuencia_total = analisis_total.get('frecuencia_amenidades', {})
+            
+            # Calcular ratio de frecuencia
+            ratios = {}
+            for amenidad, count_exitosos in frecuencia_exitosos.items():
+                count_total = frecuencia_total.get(amenidad, 0)
+                if count_total > 0:
+                    # Ratio: qué tan más común es en exitosos
+                    ratio = (count_exitosos / len(exitosos)) / (count_total / len(ds))
+                    ratios[amenidad] = {
+                        'frecuencia_exitosos': count_exitosos,
+                        'frecuencia_total': count_total,
+                        'ratio': float(ratio),
+                        'porcentaje_exitosos': float(count_exitosos / len(exitosos) * 100),
+                        'porcentaje_total': float(count_total / len(ds) * 100)
+                    }
+            
+            # Ordenar por ratio (amenidades más distintivas de exitosos)
+            top_amenidades_exitosas = sorted(
+                ratios.items(),
+                key=lambda x: x[1]['ratio'],
+                reverse=True
+            )[:15]
+            
+            print("  Top-15 amenidades más distintivas de proyectos exitosos:")
+            for amenidad, datos in top_amenidades_exitosas:
+                print(f"    - {amenidad}: Ratio {datos['ratio']:.2f}x ({datos['porcentaje_exitosos']:.1f}% en exitosos vs {datos['porcentaje_total']:.1f}% total)")
+            print()
+            
+            return {
+                'amenidades_exitosos': {k: v for k, v in top_amenidades_exitosas},
+                'analisis_exitosos': analisis_exitosos,
+                'analisis_total': analisis_total
+            }
+        
+        return analisis_exitosos if analisis_exitosos else {}
+        
+    except Exception as e:
+        print(f"⚠ Error al analizar amenidades de exitosos: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {}
 
 # ============================================================================
 # ANÁLISIS DE CARACTERÍSTICAS DE PROYECTOS EXITOSOS
@@ -2070,6 +2595,106 @@ def analizar_caracteristicas_exitosos(ds, cols_proy):
                 caracteristicas['posicion_precio_zona'] = {
                     'promedio': float(percentil_valido.mean()),
                     'mediana': float(percentil_valido.median())
+                }
+        
+        # 15. Características de inmuebles: Alcobas, Baños, Garajes
+        # Alcobas promedio
+        for col in exitosos.columns:
+            if 'alcoba' in col.lower() and ('median' in col.lower() or 'mean' in col.lower()):
+                alcobas = pd.to_numeric(exitosos[col], errors='coerce')
+                alcobas_valido = alcobas[alcobas > 0]
+                if len(alcobas_valido) > 0:
+                    caracteristicas['alcobas_promedio'] = {
+                        'promedio': float(alcobas_valido.mean()),
+                        'mediana': float(alcobas_valido.median()),
+                        'min': float(alcobas_valido.min()),
+                        'max': float(alcobas_valido.max())
+                    }
+                break
+        
+        # Baños promedio
+        for col in exitosos.columns:
+            if ('bano' in col.lower() or 'baño' in col.lower()) and ('median' in col.lower() or 'mean' in col.lower()):
+                banos = pd.to_numeric(exitosos[col], errors='coerce')
+                banos_valido = banos[banos > 0]
+                if len(banos_valido) > 0:
+                    caracteristicas['banos_promedio'] = {
+                        'promedio': float(banos_valido.mean()),
+                        'mediana': float(banos_valido.median()),
+                        'min': float(banos_valido.min()),
+                        'max': float(banos_valido.max())
+                    }
+                break
+        
+        # Garajes promedio
+        for col in exitosos.columns:
+            if 'garaje' in col.lower() and ('median' in col.lower() or 'mean' in col.lower()):
+                garajes = pd.to_numeric(exitosos[col], errors='coerce')
+                garajes_valido = garajes[garajes >= 0]
+                if len(garajes_valido) > 0:
+                    caracteristicas['garajes_promedio'] = {
+                        'promedio': float(garajes_valido.mean()),
+                        'mediana': float(garajes_valido.median()),
+                        'min': float(garajes_valido.min()),
+                        'max': float(garajes_valido.max())
+                    }
+                break
+        
+        # 16. Análisis de amenidades (columna "Otros")
+        col_otros = cols_proy.get('otros')
+        if col_otros:
+            # Verificar si la columna existe en el dataset completo (ds), no solo en exitosos
+            if col_otros in ds.columns:
+                print(f"  Analizando amenidades de proyectos exitosos (columna: {col_otros})...")
+                amenidades_exitosos = analizar_amenidades_exitosos(ds, cols_proy)
+                if amenidades_exitosos:
+                    caracteristicas['amenidades'] = amenidades_exitosos
+                    print(f"  ✓ Amenidades analizadas y agregadas a características")
+                else:
+                    print(f"  ⚠ No se pudieron analizar amenidades (función retornó vacío)")
+            else:
+                print(f"  ⚠ Columna 'Otros' ({col_otros}) no encontrada en dataset completo")
+                print(f"    Columnas disponibles que contienen 'otro': {[c for c in ds.columns if 'otro' in c.lower()]}")
+        else:
+            print("  ⚠ No se detectó columna 'Otros' en cols_proy para análisis de amenidades")
+        
+        # 17. Densidad de precio y área
+        if '_densidad_precio_area' in exitosos.columns:
+            densidad = pd.to_numeric(exitosos['_densidad_precio_area'], errors='coerce')
+            densidad_valido = densidad[densidad > 0]
+            if len(densidad_valido) > 0:
+                caracteristicas['densidad_precio_area'] = {
+                    'promedio': float(densidad_valido.mean()),
+                    'mediana': float(densidad_valido.median()),
+                    'min': float(densidad_valido.min()),
+                    'max': float(densidad_valido.max())
+                }
+        
+        # 18. Tipo VIS más común
+        tipo_vis_col = None
+        for c in exitosos.columns:
+            if 'tipo vis' in c.lower() or 'tipo_vis' in c.lower():
+                tipo_vis_col = c
+                break
+        
+        if tipo_vis_col and tipo_vis_col in exitosos.columns:
+            tipo_vis_counts = exitosos[tipo_vis_col].value_counts()
+            if len(tipo_vis_counts) > 0:
+                caracteristicas['tipo_vis'] = {
+                    'mas_comun': str(tipo_vis_counts.index[0]) if len(tipo_vis_counts) > 0 else None,
+                    'distribucion': {str(k): int(v) for k, v in tipo_vis_counts.head(5).to_dict().items()}
+                }
+        
+        # 19. Ratio vendidas/disponibles
+        if '_ratio_vendidas_disponibles' in exitosos.columns:
+            ratio = pd.to_numeric(exitosos['_ratio_vendidas_disponibles'], errors='coerce')
+            ratio_valido = ratio[ratio >= 0]
+            if len(ratio_valido) > 0:
+                caracteristicas['ratio_vendidas_disponibles'] = {
+                    'promedio': float(ratio_valido.mean()),
+                    'mediana': float(ratio_valido.median()),
+                    'min': float(ratio_valido.min()),
+                    'max': float(ratio_valido.max())
                 }
         
         print(f"  ✓ Analizadas {len(caracteristicas)} características")

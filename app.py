@@ -110,12 +110,20 @@ def get_color_by_clasificacion(clasificacion):
     # Si no es válida, usar 'Moderado' como defecto (naranja) en lugar de gris
     return COLORES_CLASIFICACION.get('Moderado', '#F39C12')
 
-def apply_filters(df, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max):
+def apply_filters(df, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado='Todos'):
     """Aplica filtros al DataFrame de manera eficiente."""
     if df.empty:
         return df
     
     df_filtered = df.copy()
+    
+    # Filtro de estado (activo/inactivo)
+    if estado and estado != 'Todos':
+        if 'Unidades_Disponibles' in df_filtered.columns:
+            if estado == 'Activos':
+                df_filtered = df_filtered[df_filtered['Unidades_Disponibles'] > 0]
+            elif estado == 'Inactivos':
+                df_filtered = df_filtered[df_filtered['Unidades_Disponibles'] == 0]
     
     # Filtro de clasificación
     if clasificacion and clasificacion != 'Todos' and 'Clasificacion' in df_filtered.columns:
@@ -208,14 +216,27 @@ def generar_clasificacion_en_memoria(xlsx_path=None):
         # Agregar por proyecto manteniendo todas las columnas de Proyectos
         proj_ds = gen_clas.agregar_datos_por_proyecto(inm_join, cols_inm, cols_proy, key_inm, key_pry)
         
+        # VALIDACIÓN CRÍTICA: Verificar que proj_ds no esté vacío después de agregar
+        if proj_ds is None or proj_ds.empty:
+            print("❌ ERROR CRÍTICO: proj_ds está vacío después de agregar_datos_por_proyecto")
+            print(f"  inm_join tenía {len(inm_join)} filas")
+            print(f"  Columnas en inm_join: {list(inm_join.columns)[:10]}...")
+            return pd.DataFrame()
+        
         print(f"  ✓ Dataset a nivel de proyecto: {len(proj_ds)} proyectos")
         print(f"  ✓ Columnas en proj_ds: {len(proj_ds.columns)}")
+        print(f"  ✓ Primeras columnas: {list(proj_ds.columns)[:10]}")
         
         # Paso 6: Feature Engineering Avanzado (FASE 2)
         # Las funciones ahora SIEMPRE devuelven valores válidos, no necesitan try-except
         print("6. Creando features avanzados...")
+        proj_ds_antes = len(proj_ds)
         proj_ds = gen_clas.crear_features_avanzados(proj_ds, cols_proy)
-        print(f"  ✓ Features avanzados procesados. DataFrame tiene {len(proj_ds)} filas")
+        if proj_ds is None or proj_ds.empty:
+            print(f"❌ ERROR: proj_ds está vacío después de crear_features_avanzados")
+            print(f"  Tenía {proj_ds_antes} filas antes")
+            return pd.DataFrame()
+        print(f"  ✓ Features avanzados procesados. DataFrame tiene {len(proj_ds)} filas (antes: {proj_ds_antes})")
         
         # Paso 7: Entrenar Modelo RandomForest (FASE 2)
         # Esta función puede devolver None si no hay datos suficientes, pero no falla
@@ -229,24 +250,41 @@ def generar_clasificacion_en_memoria(xlsx_path=None):
         # Paso 8: Calcular Score Compuesto (FASE 2)
         # Esta función SIEMPRE devuelve valores válidos
         print("8. Calculando score compuesto...")
+        proj_ds_antes = len(proj_ds)
         proj_ds = gen_clas.calcular_score_compuesto(proj_ds, cols_proy)
-        print(f"  ✓ Score compuesto calculado. DataFrame tiene {len(proj_ds)} filas")
+        if proj_ds is None or proj_ds.empty:
+            print(f"❌ ERROR: proj_ds está vacío después de calcular_score_compuesto")
+            print(f"  Tenía {proj_ds_antes} filas antes")
+            return pd.DataFrame()
+        print(f"  ✓ Score compuesto calculado. DataFrame tiene {len(proj_ds)} filas (antes: {proj_ds_antes})")
         
         # Paso 9: Clasificar proyectos (con validación y clasificación por segmentos)
         # Esta función GARANTIZA que todos los proyectos tengan clasificación válida
         print("9. Clasificando proyectos...")
-        print(f"  DataFrame antes de clasificar: {len(proj_ds)} filas")
+        proj_ds_antes = len(proj_ds)
+        print(f"  DataFrame antes de clasificar: {proj_ds_antes} filas")
         proj_ds = gen_clas.clasificar_proyectos(proj_ds, cols_proy)
         
+        if proj_ds is None or proj_ds.empty:
+            print(f"❌ ERROR: proj_ds está vacío después de clasificar_proyectos")
+            print(f"  Tenía {proj_ds_antes} filas antes")
+            return pd.DataFrame()
+        
         # Verificar que TODOS los proyectos tengan clasificación válida
+        if 'Clasificacion' not in proj_ds.columns:
+            print("❌ ERROR: No se encontró columna 'Clasificacion' después de clasificar_proyectos")
+            print(f"  Columnas disponibles: {list(proj_ds.columns)}")
+            return pd.DataFrame()
+        
         clasificaciones_validas = proj_ds['Clasificacion'].isin(['Exitoso', 'Moderado', 'Mejorable'])
         if not clasificaciones_validas.all():
             sin_clasificar = (~clasificaciones_validas).sum()
             print(f"  ⚠ ADVERTENCIA: {sin_clasificar} proyectos sin clasificación válida, corrigiendo...")
             proj_ds.loc[~clasificaciones_validas, 'Clasificacion'] = 'Moderado'
-            proj_ds.loc[~clasificaciones_validas, 'Score_Exito'] = 0.5
+            if 'Score_Exito' in proj_ds.columns:
+                proj_ds.loc[~clasificaciones_validas, 'Score_Exito'] = 0.5
         
-        print(f"  ✓ Clasificación completada. DataFrame tiene {len(proj_ds)} filas")
+        print(f"  ✓ Clasificación completada. DataFrame tiene {len(proj_ds)} filas (antes: {proj_ds_antes})")
         print(f"    - Exitosos: {(proj_ds['Clasificacion'] == 'Exitoso').sum()}")
         print(f"    - Moderados: {(proj_ds['Clasificacion'] == 'Moderado').sum()}")
         print(f"    - Mejorables: {(proj_ds['Clasificacion'] == 'Mejorable').sum()}")
@@ -259,14 +297,38 @@ def generar_clasificacion_en_memoria(xlsx_path=None):
         
         # Paso 10.5: Analizar características de proyectos exitosos
         print("10.5. Analizando características de proyectos exitosos...")
+        # Verificar que la columna "Otros" esté disponible para análisis de amenidades
+        col_otros = cols_proy.get('otros')
+        if col_otros:
+            if col_otros in proj_ds.columns:
+                print(f"  ✓ Columna 'Otros' encontrada: {col_otros}")
+                # Verificar si hay datos en la columna
+                otros_no_vacios = proj_ds[col_otros].notna() & (proj_ds[col_otros].astype(str).str.strip() != '')
+                print(f"  ✓ Proyectos con datos en 'Otros': {otros_no_vacios.sum()} de {len(proj_ds)}")
+            else:
+                print(f"  ⚠ Columna 'Otros' detectada como '{col_otros}' pero no está en proj_ds")
+                print(f"    Columnas disponibles en proj_ds: {[c for c in proj_ds.columns if 'otro' in c.lower()]}")
+        else:
+            print("  ⚠ No se detectó columna 'Otros' en cols_proy")
+        
         global caracteristicas_exitosos_global
         caracteristicas_exitosos_global = gen_clas.analizar_caracteristicas_exitosos(proj_ds, cols_proy)
         if caracteristicas_exitosos_global:
             print(f"  ✓ Características analizadas: {len(caracteristicas_exitosos_global)} métricas")
+            # Verificar si hay amenidades en las características
+            if 'amenidades' in caracteristicas_exitosos_global:
+                amenidades = caracteristicas_exitosos_global['amenidades']
+                if amenidades and 'amenidades_exitosos' in amenidades:
+                    num_amenidades = len(amenidades['amenidades_exitosos'])
+                    print(f"  ✓ Amenidades analizadas: {num_amenidades} amenidades distintas")
+                else:
+                    print("  ⚠ Amenidades no encontradas en caracteristicas_exitosos_global")
+            else:
+                print("  ⚠ No hay sección 'amenidades' en caracteristicas_exitosos_global")
         else:
             print("  ⚠ No se pudieron analizar características de proyectos exitosos")
         
-        # Paso 11: Limpiar columnas temporales
+        # Paso 11: Limpiar columnas temporales del proj_ds antes de generar archivo final
         try:
             columnas_temp = ['_segmento', '_metodo_clasificacion', '_es_anomalia', '_razon_anomalia']
             columnas_a_eliminar = [col for col in columnas_temp if col in proj_ds.columns]
@@ -281,17 +343,42 @@ def generar_clasificacion_en_memoria(xlsx_path=None):
         # Paso 12: Generar DataFrame final con formato esperado
         print("11. Generando formato final...")
         print(f"  DataFrame antes de generar archivo final: {len(proj_ds)} filas, {len(proj_ds.columns)} columnas")
+        
+        # VALIDACIÓN CRÍTICA: Verificar que proj_ds no esté vacío antes de generar archivo final
+        if proj_ds is None or proj_ds.empty:
+            print("❌ ERROR CRÍTICO: proj_ds está vacío antes de generar archivo final")
+            print(f"  Tipo: {type(proj_ds)}")
+            if proj_ds is not None:
+                print(f"  Tamaño: {len(proj_ds)}")
+                print(f"  Columnas: {list(proj_ds.columns)}")
+            return pd.DataFrame()
+        
+        print(f"  ✓ Validación: proj_ds tiene {len(proj_ds)} filas y {len(proj_ds.columns)} columnas")
+        print(f"  ✓ Columnas clave esperadas:")
+        print(f"    - Clasificacion: {'Clasificacion' in proj_ds.columns}")
+        print(f"    - Score_Exito: {'Score_Exito' in proj_ds.columns}")
+        print(f"    - cols_proy['nombre']: {cols_proy.get('nombre')} ({cols_proy.get('nombre') in proj_ds.columns if cols_proy.get('nombre') else 'N/A'})")
+        print(f"    - cols_proy['codigo']: {cols_proy.get('codigo')} ({cols_proy.get('codigo') in proj_ds.columns if cols_proy.get('codigo') else 'N/A'})")
+        print()
+        
         try:
             resultado = gen_clas.generar_archivo_final(proj_ds, cols_proy, key_pry)
             
-            if resultado.empty:
-                print("⚠ Advertencia: El resultado final está vacío")
-                print(f"  Proj_ds tiene {len(proj_ds)} filas antes de generar archivo final")
-                print(f"  Columnas en proj_ds: {list(proj_ds.columns)}")
+            if resultado is None or resultado.empty:
+                print("❌ ERROR: El resultado final está vacío o es None")
+                print(f"  Tipo de resultado: {type(resultado)}")
+                if resultado is not None:
+                    print(f"  Tamaño de resultado: {len(resultado)}")
+                    print(f"  Columnas en resultado: {list(resultado.columns)}")
+                print(f"  Proj_ds tenía {len(proj_ds)} filas antes de generar archivo final")
+                print(f"  Columnas en proj_ds: {list(proj_ds.columns)[:20]}...")
                 return pd.DataFrame()
             
-            print(f"✓ Clasificación generada: {len(resultado)} proyectos")
-            print(f"  Columnas en resultado: {list(resultado.columns)}")
+            print(f"✓ Dataset final generado: {len(resultado)} proyectos")
+            print(f"  Columnas en resultado: {len(resultado.columns)}")
+            print(f"  Columnas: {list(resultado.columns)}")
+            print()
+            print("  ✓ Retornando dataset de salida del modelo sin modificaciones adicionales")
             print()
             
             return resultado
@@ -478,9 +565,15 @@ def load_data():
         return df_with_coords
         
     except Exception as e:
+        print("=" * 70)
+        print("  ERROR CRÍTICO AL CARGAR DATOS")
+        print("=" * 70)
         print(f"[ERROR] Error al cargar datos: {str(e)}")
+        print()
         import traceback
+        print("  Detalles del error:")
         traceback.print_exc()
+        print("=" * 70)
         return pd.DataFrame()
 
 def proyecto_to_dict(row):
@@ -495,6 +588,11 @@ def proyecto_to_dict(row):
         # Si no es válida, usar 'Moderado' por defecto
         clasificacion = 'Moderado'
     
+    # Obtener constructor y limpiar si es necesario
+    constructor = str(row.get('Constructor', 'N/A')).strip()
+    if constructor == 'nan' or constructor == '' or constructor.lower() == 'none':
+        constructor = 'N/A'
+    
     return {
         'id': str(row.name),
         'codigo': str(row.get('Codigo_Proyecto', 'N/A')),
@@ -505,6 +603,7 @@ def proyecto_to_dict(row):
         'barrio': str(row.get('Barrio', 'N/A')),
         'zona': str(row.get('Zona', 'N/A')),
         'estrato': str(row.get('Estrato', 'N/A')) if pd.notna(row.get('Estrato')) and pd.to_numeric(row.get('Estrato', 0), errors='coerce') != 0 else 'N/A',
+        'constructor': constructor,
         'precio_promedio': float(row.get('Precio_Promedio', 0)) if pd.notna(row.get('Precio_Promedio')) else 0,
         'precio_formateado': format_currency(row.get('Precio_Promedio', np.nan)),
         'area_promedio': float(row.get('Area_Promedio', 0)) if pd.notna(row.get('Area_Promedio')) else 0,
@@ -595,6 +694,35 @@ def index():
     """Página principal."""
     return render_template('index.html')
 
+@app.route('/api/diagnostico')
+def diagnostico():
+    """API de diagnóstico para verificar el estado de los datos."""
+    import os
+    from pathlib import Path
+    
+    script_dir = Path(__file__).parent.absolute()
+    base_proyectos_path = script_dir / 'Base Proyectos.xlsx'
+    
+    diagnostico_info = {
+        'df_data_vacio': df_data.empty,
+        'df_data_tamano': len(df_data) if not df_data.empty else 0,
+        'archivo_existe': base_proyectos_path.exists(),
+        'archivo_ruta': str(base_proyectos_path.absolute()),
+        'directorio_script': str(script_dir),
+        'directorio_trabajo': str(os.getcwd()),
+        'archivo_tamano': base_proyectos_path.stat().st_size if base_proyectos_path.exists() else 0,
+        'columnas_df': list(df_data.columns) if not df_data.empty else []
+    }
+    
+    # Verificar si hay archivos .xlsx en el directorio
+    try:
+        archivos_xlsx = [f.name for f in script_dir.glob('*.xlsx')]
+        diagnostico_info['archivos_xlsx_encontrados'] = archivos_xlsx
+    except Exception as e:
+        diagnostico_info['archivos_xlsx_encontrados'] = f'Error: {str(e)}'
+    
+    return jsonify(diagnostico_info)
+
 @app.route('/api/proyectos')
 def get_proyectos():
     """API para obtener proyectos con filtros."""
@@ -602,9 +730,14 @@ def get_proyectos():
         # Validar que df_data no esté vacío
         if df_data.empty:
             print("⚠ ADVERTENCIA: Intentando obtener proyectos pero df_data está vacío")
+            print("  Esto puede deberse a:")
+            print("    1. El archivo 'Base Proyectos.xlsx' no existe o no se encontró")
+            print("    2. Error en la generación de clasificación (revisa los logs anteriores)")
+            print("    3. El archivo está vacío o no tiene datos válidos")
+            print("    4. Error durante el procesamiento de datos")
             return jsonify({
                 'success': False,
-                'error': 'No hay datos disponibles. Verifica que el archivo Base Proyectos.xlsx exista y contenga datos.',
+                'error': 'No hay datos disponibles. Verifica que el archivo Base Proyectos.xlsx exista y contenga datos. Revisa la consola del servidor para más detalles.',
                 'proyectos': [],
                 'total': 0
             }), 200  # Retornar 200 para que el frontend pueda mostrar el error
@@ -616,9 +749,10 @@ def get_proyectos():
         tipo_vis = request.args.get('tipo_vis', 'Todos')
         precio_min = request.args.get('precio_min', None)
         precio_max = request.args.get('precio_max', None)
+        estado = request.args.get('estado', 'Todos')
         
         # Aplicar filtros
-        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max)
+        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado)
         
         # Convertir a JSON de manera eficiente
         proyectos = [proyecto_to_dict(row) for _, row in df_filtered.iterrows()]
@@ -688,9 +822,10 @@ def get_estadisticas():
         tipo_vis = request.args.get('tipo_vis', 'Todos')
         precio_min = request.args.get('precio_min', None)
         precio_max = request.args.get('precio_max', None)
+        estado = request.args.get('estado', 'Todos')
         
         # Aplicar filtros usando función helper
-        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max)
+        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado)
         
         # Validar que df_data no esté vacío
         if df_data.empty:
@@ -700,7 +835,7 @@ def get_estadisticas():
                 'exitosos': 0,
                 'moderados': 0,
                 'mejorables': 0,
-                'avg_score': 0
+                'score_promedio': 0.0
             })
         
         # Calcular estadísticas
@@ -739,9 +874,10 @@ def descargar_csv():
         tipo_vis = request.args.get('tipo_vis', 'Todos')
         precio_min = request.args.get('precio_min', None)
         precio_max = request.args.get('precio_max', None)
+        estado = request.args.get('estado', 'Todos')
         
         # Aplicar filtros usando función helper
-        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max)
+        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado)
         
         # Crear CSV en memoria
         output = io.StringIO()
@@ -806,6 +942,152 @@ def get_caracteristicas_exitosos():
         })
     except Exception as e:
         print(f"❌ Error en /api/caracteristicas-exitosos: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+def calcular_ranking_constructores(df, estado_filtro='Todos'):
+    """Calcula el ranking de constructores con estadísticas de proyectos.
+    
+    Args:
+        df: DataFrame con proyectos
+        estado_filtro: 'Todos', 'Activos', 'Inactivos'
+    
+    Returns:
+        Lista de diccionarios con información de constructores ordenados por score promedio
+    """
+    try:
+        if df.empty:
+            return []
+        
+        # Buscar columna de constructor
+        col_constructor = None
+        # Primero buscar 'Constructor' exacto
+        if 'Constructor' in df.columns:
+            col_constructor = 'Constructor'
+        else:
+            # Buscar cualquier columna que contenga 'constructor' o 'constructora'
+            for col in df.columns:
+                if 'constructor' in col.lower() or 'constructora' in col.lower():
+                    col_constructor = col
+                    break
+        
+        if not col_constructor:
+            print("⚠ No se encontró columna de constructor en el dataset")
+            return []
+        
+        # Filtrar por estado (activo/inactivo)
+        df_filtrado = df.copy()
+        if estado_filtro == 'Activos':
+            # Proyectos activos: tienen unidades disponibles > 0
+            if 'Unidades_Disponibles' in df_filtrado.columns:
+                df_filtrado = df_filtrado[df_filtrado['Unidades_Disponibles'] > 0]
+        elif estado_filtro == 'Inactivos':
+            # Proyectos inactivos: unidades disponibles = 0 o no tienen disponibilidad
+            if 'Unidades_Disponibles' in df_filtrado.columns:
+                df_filtrado = df_filtrado[df_filtrado['Unidades_Disponibles'] == 0]
+        
+        # Agrupar por constructor
+        constructores_stats = []
+        
+        for constructor, grupo in df_filtrado.groupby(col_constructor):
+            if pd.isna(constructor) or str(constructor).strip() == '' or str(constructor).lower() == 'nan':
+                continue
+            
+            # Limpiar nombre del constructor
+            constructor_nombre = str(constructor).strip()
+            
+            # Eliminar ".0" si es un número flotante convertido a string
+            if constructor_nombre.endswith('.0') and constructor_nombre.replace('.0', '').replace('-', '').isdigit():
+                constructor_nombre = constructor_nombre.rstrip('.0')
+            
+            # Si es un número puro (sin decimales), es probable que sea un código
+            # En este caso, buscar en el dataset enriquecido si hay otra columna con nombres
+            if constructor_nombre.replace('-', '').isdigit():
+                # Es un número/código, buscar columnas alternativas que puedan tener el nombre
+                primer_proyecto = grupo.iloc[0]
+                
+                # Buscar columnas que contengan "constructor" o "constructora" pero no sean la misma
+                for col in df_filtrado.columns:
+                    if col != col_constructor and ('constructor' in col.lower() or 'constructora' in col.lower()):
+                        valor = primer_proyecto.get(col)
+                        if pd.notna(valor):
+                            valor_str = str(valor).strip()
+                            # Si el valor no es numérico, usarlo como nombre
+                            if valor_str and not valor_str.replace('.', '').replace('-', '').isdigit():
+                                constructor_nombre = valor_str
+                                break
+                
+                # Si aún es un número después de buscar, formatearlo como "Constructor #XXXX"
+                if constructor_nombre.replace('-', '').isdigit():
+                    # Mantener el número pero formateado mejor
+                    constructor_nombre = f"Constructor #{constructor_nombre}"
+            
+            total_proyectos = len(grupo)
+            
+            # Contar por clasificación
+            exitosos = len(grupo[grupo['Clasificacion'] == 'Exitoso'])
+            moderados = len(grupo[grupo['Clasificacion'] == 'Moderado'])
+            mejorables = len(grupo[grupo['Clasificacion'] == 'Mejorable'])
+            
+            # Calcular score promedio
+            score_promedio = float(grupo['Score_Exito'].mean()) if 'Score_Exito' in grupo.columns else 0.5
+            
+            # Calcular porcentaje de exitosos
+            porcentaje_exitosos = (exitosos / total_proyectos * 100) if total_proyectos > 0 else 0
+            
+            # Calcular score compuesto para ranking (ponderado: 60% score promedio, 40% % exitosos)
+            score_ranking = (score_promedio * 0.6) + (porcentaje_exitosos / 100 * 0.4)
+            
+            constructores_stats.append({
+                'constructor': constructor_nombre,
+                'total_proyectos': total_proyectos,
+                'exitosos': exitosos,
+                'moderados': moderados,
+                'mejorables': mejorables,
+                'score_promedio': round(score_promedio, 3),
+                'porcentaje_exitosos': round(porcentaje_exitosos, 1),
+                'score_ranking': round(score_ranking, 3)
+            })
+        
+        # Ordenar por score_ranking (descendente) y tomar top 10
+        constructores_stats.sort(key=lambda x: x['score_ranking'], reverse=True)
+        
+        return constructores_stats[:10]
+        
+    except Exception as e:
+        print(f"⚠ Error al calcular ranking de constructores: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+@app.route('/api/ranking-constructores')
+def get_ranking_constructores():
+    """API para obtener el ranking de constructores."""
+    try:
+        if df_data.empty:
+            return jsonify({
+                'success': False,
+                'error': 'No hay datos disponibles. Verifica que el archivo Base Proyectos.xlsx exista y contenga datos. Revisa la consola del servidor para más detalles.',
+                'ranking': []
+            }), 200
+        
+        # Obtener filtro de estado
+        estado_filtro = request.args.get('estado', 'Todos')
+        
+        # Calcular ranking
+        ranking = calcular_ranking_constructores(df_data, estado_filtro)
+        
+        return jsonify({
+            'success': True,
+            'ranking': ranking,
+            'estado_filtro': estado_filtro
+        })
+    except Exception as e:
+        print(f"❌ Error en /api/ranking-constructores: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({

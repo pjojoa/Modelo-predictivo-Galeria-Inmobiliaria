@@ -62,6 +62,15 @@
             </div>
             
             <div class="filter-section">
+                <label for="estado">Estado del Proyecto</label>
+                <select id="estado" class="filter-select">
+                    <option value="Todos">Todos</option>
+                    <option value="Activos">Activos</option>
+                    <option value="Inactivos">Inactivos</option>
+                </select>
+            </div>
+            
+            <div class="filter-section">
                 <label for="precio_range">Rango de Precio (COP)</label>
                 <div class="price-range">
                     <input type="number" id="precio_min" class="price-input" placeholder="Mínimo">
@@ -131,17 +140,48 @@
                         
                         <h5>Factores Considerados en la Clasificación:</h5>
                         <ul class="factors-list">
-                            <li><strong>Velocidad de ventas:</strong> Unidades vendidas por mes</li>
-                            <li><strong>Tiempo de agotamiento:</strong> Meses estimados para vender el inventario disponible</li>
-                            <li><strong>Penetración de mercado:</strong> Porcentaje de unidades vendidas vs. total</li>
-                            <li><strong>Velocidad histórica:</strong> Tendencia de ventas a lo largo del tiempo</li>
-                            <li><strong>Posición de precio:</strong> Comparación con proyectos similares en la zona/estrato</li>
+                            <li><strong>Tiempo de agotamiento (30%):</strong> Meses estimados para vender el inventario disponible</li>
+                            <li><strong>Velocidad de ventas (18%):</strong> Unidades vendidas por mes</li>
+                            <li><strong>Penetración de mercado (12%):</strong> Porcentaje de unidades vendidas vs. total</li>
+                            <li><strong>Antigüedad y eficiencia temporal (10%):</strong> Tiempo objetivo de 24 meses (2 años) para cerrar un proyecto exitoso. Proyectos que cerraron en menos de 24 meses reciben score alto. Proyectos inactivos (ya vendidos) usan solo el tiempo desde inicio. Proyectos activos usan tiempo desde inicio + tiempo para agotar.</li>
+                            <li><strong>Tamaño del proyecto (7%):</strong> Número de unidades (óptimo: 50-150 unidades)</li>
+                            <li><strong>Precio por m² (7%):</strong> Posición competitiva dentro del segmento (zona/estrato)</li>
+                            <li><strong>Área promedio (5%):</strong> Área de los inmuebles (óptimo: 60-100 m²)</li>
+                            <li><strong>Características inmuebles (4%):</strong> Alcobas (2-3), Baños (2-3), Garajes (1-2)</li>
+                            <li><strong>Amenidades (3%):</strong> Número y tipo de amenidades en zonas comunes</li>
+                            <li><strong>Patrón de ventas (2%):</strong> Acelerado, Constante o Desacelerado</li>
                             <li><strong>Segmentación:</strong> Clasificación por Zona, Estrato y Tipo VIS para comparaciones justas</li>
                             <li><strong>Modelo ML:</strong> RandomForest Regressor para predecir meses de agotamiento</li>
-                            <li><strong>Score Compuesto:</strong> Métrica combinada que integra múltiples factores</li>
                         </ul>
                         
-                        <p><strong>Nota:</strong> La clasificación se realiza por segmentos (Zona/Estrato/Tipo VIS) para asegurar comparaciones justas entre proyectos similares.</p>
+                        <div class="classification-detail" style="margin-top: 1rem; background: #FFF3CD; padding: 1rem; border-radius: 8px; border-left: 4px solid #FFC107;">
+                            <h5><i class="fas fa-clock"></i> Factor de Antigüedad y Eficiencia Temporal:</h5>
+                            <p><strong>Tiempo Objetivo:</strong> 24 meses (2 años) para cerrar un proyecto exitoso desde su fecha de inicio.</p>
+                            <p>Los proyectos se evalúan según su eficiencia temporal:</p>
+                            <ul>
+                                <li><strong>Proyectos que cerraron en ≤24 meses:</strong> Excelente desempeño (score alto: 0.7-1.0)</li>
+                                <li><strong>Proyectos que cerraron en 24-36 meses:</strong> Aceptable (score medio-alto: 0.5-0.7)</li>
+                                <li><strong>Proyectos que cerraron/tomarán 36-48 meses:</strong> Problemático (score medio: 0.3-0.5)</li>
+                                <li><strong>Proyectos que tomarán >48 meses:</strong> Muy problemático (score bajo: 0.1-0.3)</li>
+                                <li><strong>Proyectos inactivos:</strong> Si ya se vendió todo (Unidades_Disponibles = 0), el tiempo de cierre es solo el tiempo desde inicio hasta que se vendió todo</li>
+                                <li><strong>Proyectos activos:</strong> El tiempo de cierre se calcula como: meses desde inicio + meses para agotar inventario</li>
+                                <li><strong>Penalización adicional:</strong> Proyectos activos con más de 2 años desde inicio y menos del 50% vendido reciben penalización adicional</li>
+                            </ul>
+                            <p><strong>Ejemplo:</strong> Un proyecto que lleva 5 años activo y solo ha vendido el 50% de sus unidades claramente tiene problemas de flujo de caja y no es exitoso, aunque tenga buenas ventas recientes.</p>
+                        </div>
+                        
+                        <div class="classification-detail" style="margin-top: 1rem;">
+                            <h5>Método de Clasificación:</h5>
+                            <p>La clasificación utiliza un <strong>Score Compuesto Ponderado</strong> que combina todas las variables anteriores. Los proyectos se comparan dentro de su segmento (misma Zona, Estrato y Tipo VIS) para asegurar comparaciones justas.</p>
+                            <p><strong>Rangos de Clasificación:</strong></p>
+                            <ul>
+                                <li><strong>Exitoso:</strong> Score 0.62 - 0.79 (≥67% del score compuesto)</li>
+                                <li><strong>Moderado:</strong> Score 0.50 - 0.62 (33% - 67% del score compuesto)</li>
+                                <li><strong>Mejorable:</strong> Score 0.21 - 0.50 (<33% del score compuesto)</li>
+                            </ul>
+                        </div>
+                        
+                        <p><strong>Nota:</strong> La clasificación se realiza por segmentos (Zona/Estrato/Tipo VIS) para asegurar comparaciones justas entre proyectos similares. Las amenidades se extraen de la columna "Otros" separadas por comas.</p>
                     </div>
                 </details>
             </div>
@@ -211,76 +251,125 @@
                 </div>
             </div>
 
-            <!-- Mapa -->
-            <div class="map-container">
-                <h3><i class="fas fa-map"></i> <span id="map-count">0</span> proyectos en el mapa</h3>
-                <div id="map"></div>
+            <!-- Mapa y Ranking de Constructores -->
+            <div class="map-constructors-container">
+                <!-- Mapa -->
+                <div class="map-container">
+                    <h3><i class="fas fa-map"></i> <span id="map-count">0</span> proyectos en el mapa</h3>
+                    <div id="map"></div>
+                </div>
+                
+                <!-- Ranking de Constructores -->
+                <div class="constructors-panel">
+                    <div class="constructors-header">
+                        <h3><i class="fas fa-trophy"></i> Top 10 Constructores</h3>
+                    </div>
+                    <div class="constructors-content" id="constructors-ranking">
+                        <div class="loading-state">
+                            <i class="fas fa-spinner fa-spin"></i> Cargando ranking...
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <!-- Tabla de proyectos -->
-            <div class="table-container">
-                <div class="table-header">
-                    <h3><i class="fas fa-table"></i> Tabla de Proyectos <span id="table-count" class="table-count">(0 proyectos)</span></h3>
-                    <button id="btn-download" class="btn-download">
-                        <i class="fas fa-download"></i> Descargar CSV
+            <!-- Tabs para Tabla y Características -->
+            <div class="tabs-container">
+                <div class="tabs-header">
+                    <button class="tab-button active" data-tab="tabla">
+                        <i class="fas fa-table"></i> Tabla de Proyectos
+                        <span id="table-count" class="tab-count">(0)</span>
+                    </button>
+                    <button class="tab-button" data-tab="caracteristicas">
+                        <i class="fas fa-chart-line"></i> Características Exitosos
                     </button>
                 </div>
-                <div class="table-wrapper">
-                    <table id="proyectos-table">
-                        <thead>
-                            <tr>
-                                <th class="sortable" data-column="codigo">
-                                    <span>Código</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="nombre">
-                                    <span>Proyecto</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="clasificacion">
-                                    <span>Clasificación</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="barrio">
-                                    <span>Barrio</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="zona">
-                                    <span>Zona</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="precio_promedio">
-                                    <span>Precio Promedio</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="area_promedio">
-                                    <span>Área (m²)</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="velocidad_ventas">
-                                    <span>Velocidad Ventas</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="unidades_vendidas">
-                                    <span>Unid. Vendidas</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="unidades_disponibles">
-                                    <span>Unid. Disponibles</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                                <th class="sortable" data-column="score_exito">
-                                    <span>Score Éxito</span>
-                                    <span class="sort-indicator"><i class="fas fa-sort"></i></span>
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody id="table-body">
-                            <tr>
-                                <td colspan="11" class="loading">Cargando datos...</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                
+                <!-- Tab: Tabla de Proyectos -->
+                <div class="tab-content active" id="tab-tabla">
+                    <div class="table-container">
+                        <div class="table-header">
+                            <h3><i class="fas fa-table"></i> Tabla de Proyectos</h3>
+                            <button id="btn-download" class="btn-download">
+                                <i class="fas fa-download"></i> Descargar CSV
+                            </button>
+                        </div>
+                        <div class="table-wrapper">
+                            <table id="proyectos-table">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" data-column="codigo">
+                                            <span>Código</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="nombre">
+                                            <span>Proyecto</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="clasificacion">
+                                            <span>Clasificación</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="barrio">
+                                            <span>Barrio</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="zona">
+                                            <span>Zona</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="constructor">
+                                            <span>Constructor</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="precio_promedio">
+                                            <span>Precio Promedio</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="area_promedio">
+                                            <span>Área (m²)</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="velocidad_ventas">
+                                            <span>Velocidad Ventas</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="unidades_vendidas">
+                                            <span>Unid. Vendidas</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="unidades_disponibles">
+                                            <span>Unid. Disponibles</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                        <th class="sortable" data-column="score_exito">
+                                            <span>Score Éxito</span>
+                                            <span class="sort-indicator"><i class="fas fa-sort"></i></span>
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table-body">
+                                    <tr>
+                                        <td colspan="12" class="loading">Cargando datos...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Tab: Características de Proyectos Exitosos -->
+                <div class="tab-content" id="tab-caracteristicas">
+                    <div class="characteristics-container">
+                        <div class="characteristics-header">
+                            <h3><i class="fas fa-chart-line"></i> Características Comunes de Proyectos Exitosos</h3>
+                            <p class="characteristics-subtitle">Análisis de patrones y características que comparten los proyectos clasificados como exitosos</p>
+                        </div>
+                        <div class="characteristics-content" id="caracteristicas-exitosos">
+                            <div class="loading-state">
+                                <i class="fas fa-spinner fa-spin"></i> Cargando características...
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
