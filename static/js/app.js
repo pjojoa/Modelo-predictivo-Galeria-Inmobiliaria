@@ -31,8 +31,8 @@ let markersEnabled = true; // Por defecto los marcadores están visibles
 let heatmapDebounceTimer = null;
 let markerColorCriterion = 'clasificacion'; // Criterio para colorear marcadores
 
-// Variables para filtrado de categorías (estilo Power BI - selección única)
-let selectedCategoryId = null; // ID de la categoría seleccionada (null si no hay selección)
+// Variables para filtrado de categorías (selección múltiple con Ctrl)
+let selectedCategories = new Set(); // IDs de las categorías seleccionadas (Set para múltiples selecciones)
 let allCategories = []; // Todas las categorías disponibles
 
 // Inicialización
@@ -51,6 +51,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setupToolbarToggle();
     setupMarkerLegendToggle();
     setupCategoriesPanel();
+    setupCategoryTableToggle();
 });
 
 // Configurar vista previa 360°
@@ -174,7 +175,12 @@ function mostrarRankingConstructores(ranking) {
         
         const vendedorNombre = escapeHtml(constructor.vendedor || 'Vendedor Sin Nombre');
         html += `
-            <div class="constructor-item ${isTop3 ? 'top-3' : ''}" style="animation-delay: ${delay}s">
+            <div class="constructor-item ${isTop3 ? 'top-3' : ''}" 
+                 data-vendedor="${escapeHtml(constructor.vendedor || '')}" 
+                 style="animation-delay: ${delay}s"
+                 role="button"
+                 tabindex="0"
+                 aria-label="Filtrar por ${vendedorNombre}">
                 <div class="constructor-header">
                     <div class="constructor-rank">${rank}</div>
                     <div class="constructor-name" title="${vendedorNombre}">
@@ -225,6 +231,72 @@ function mostrarRankingConstructores(ranking) {
     });
     
     container.innerHTML = html;
+    
+    // Agregar event listeners para filtrado
+    setupConstructorFiltering();
+}
+
+// Variable global para el constructor seleccionado
+let selectedConstructor = null;
+
+// Configurar filtrado por constructor
+function setupConstructorFiltering() {
+    const constructorItems = document.querySelectorAll('.constructor-item');
+    
+    constructorItems.forEach(item => {
+        // Click
+        item.addEventListener('click', function() {
+            const vendedor = this.getAttribute('data-vendedor');
+            toggleConstructorFilter(vendedor);
+        });
+        
+        // Teclado
+        item.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                const vendedor = this.getAttribute('data-vendedor');
+                toggleConstructorFilter(vendedor);
+            }
+        });
+    });
+}
+
+// Toggle filtro de constructor
+function toggleConstructorFilter(vendedor) {
+    if (!vendedor || vendedor === '') return;
+    
+    // Si ya está seleccionado, deseleccionar
+    if (selectedConstructor === vendedor) {
+        selectedConstructor = null;
+        // Remover selección visual
+        document.querySelectorAll('.constructor-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+        // Remover filtro de vendedor
+        delete currentFilters.vende;
+    } else {
+        // Seleccionar nuevo constructor
+        selectedConstructor = vendedor;
+        // Actualizar selección visual
+        document.querySelectorAll('.constructor-item').forEach(item => {
+            if (item.getAttribute('data-vendedor') === vendedor) {
+                item.classList.add('selected');
+            } else {
+                item.classList.remove('selected');
+            }
+        });
+        // Aplicar filtro directamente
+        currentFilters.vende = vendedor;
+    }
+    
+    // Recargar proyectos con el filtro aplicado
+    loadProyectos();
+    
+    // Scroll suave al mapa
+    const mapElement = document.getElementById('map');
+    if (mapElement) {
+        mapElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
 
 // Inicializar mapa
@@ -809,6 +881,23 @@ async function loadProyectos() {
             
             console.log(`Proyectos cargados: ${proyectosData.length}`);
             
+            // DEBUG: Verificar que año y tipo_vis estén presentes
+            if (proyectosData.length > 0) {
+                const sample = proyectosData[0];
+                console.log('[DEBUG] Muestra de proyecto:', {
+                    nombre: sample.nombre,
+                    año: sample.año,
+                    tipo_vis: sample.tipo_vis,
+                    estrato: sample.estrato,
+                    vende: sample.vende
+                });
+                // Contar proyectos con año
+                const conAño = proyectosData.filter(p => p.año !== null && p.año !== undefined && p.año !== '').length;
+                const conTipoVis = proyectosData.filter(p => p.tipo_vis && p.tipo_vis !== 'N/A').length;
+                console.log(`[DEBUG] Proyectos con año: ${conAño}/${proyectosData.length}`);
+                console.log(`[DEBUG] Proyectos con tipo_vis: ${conTipoVis}/${proyectosData.length}`);
+            }
+            
             // Actualizar todas las vistas
             updateMap();
             updateTable();
@@ -916,7 +1005,7 @@ function updateMap() {
     const dataToShow = proyectosData;
 
     console.log('[updateMap] dataToShow.length:', dataToShow.length);
-    console.log('[updateMap] selectedCategoryId:', selectedCategoryId);
+    console.log('[updateMap] selectedCategories.size:', selectedCategories.size);
 
     if (dataToShow.length === 0) {
         console.warn('[updateMap] No hay datos para mostrar');
@@ -1227,14 +1316,27 @@ function getMarkerColor(proyecto) {
             case 'año':
                 // Formatear año: si es 2000-2099, mostrar solo los últimos 2 dígitos para consistencia
                 let año_str = 'N/A';
-                if (proyecto.año) {
+                // Verificar si existe y no es null/undefined/0
+                if (proyecto.año !== null && proyecto.año !== undefined && proyecto.año !== '' && proyecto.año !== 0) {
                     const año_num = parseInt(proyecto.año);
-                    if (año_num >= 2000 && año_num < 2100) {
-                        // Mostrar solo los últimos 2 dígitos (00-99)
-                        año_str = String(año_num % 100).padStart(2, '0');
+                    if (!isNaN(año_num) && año_num > 0) {
+                        if (año_num >= 2000 && año_num < 2100) {
+                            // Mostrar solo los últimos 2 dígitos (00-99)
+                            año_str = String(año_num % 100).padStart(2, '0');
+                        } else if (año_num >= 1900 && año_num < 2000) {
+                            // Años del siglo pasado, mostrar completo
+                            año_str = String(año_num);
+                        } else if (año_num < 100) {
+                            // Si es menor a 100, asumir que son los últimos 2 dígitos desde 2000
+                            año_str = String(año_num).padStart(2, '0');
+                        } else {
+                            año_str = String(año_num);
+                        }
                     } else {
-                        año_str = String(año_num);
+                        console.warn(`[getMarkerColor] Año inválido para proyecto ${proyecto.id}: ${proyecto.año} -> ${año_num}`);
                     }
+                } else {
+                    console.warn(`[getMarkerColor] Proyecto ${proyecto.id} sin año:`, proyecto.año);
                 }
                 color = generateColorFromString(año_str);
                 break;
@@ -1245,6 +1347,18 @@ function getMarkerColor(proyecto) {
                 
             case 'barrio':
                 color = generateColorFromString(String(proyecto.barrio || 'N/A'));
+                break;
+                
+            case 'estrato':
+                color = generateColorFromString(String(proyecto.estrato || 'N/A'));
+                break;
+                
+            case 'tipo_vis':
+                const tipoVisStr = String(proyecto.tipo_vis || 'N/A').trim();
+                if (tipoVisStr === 'N/A' || tipoVisStr === '') {
+                    console.warn(`[getMarkerColor] Proyecto ${proyecto.id} sin tipo_vis:`, proyecto.tipo_vis);
+                }
+                color = generateColorFromString(tipoVisStr);
                 break;
                 
             default:
@@ -1572,25 +1686,15 @@ async function updateStats() {
             const mejorables = data.mejorables || 0;
             
             // Actualizar sidebar stats
-            document.getElementById('total-proyectos').textContent = total;
-            document.getElementById('exitosos').textContent = exitosos;
-            document.getElementById('moderados').textContent = moderados;
-            document.getElementById('mejorables').textContent = mejorables;
+            const totalProyectosEl = document.getElementById('total-proyectos');
+            const exitososEl = document.getElementById('exitosos');
+            const moderadosEl = document.getElementById('moderados');
+            const mejorablesEl = document.getElementById('mejorables');
             
-            // Actualizar métricas principales
-            const metricExitosos = document.getElementById('metric-exitosos');
-            const metricModerados = document.getElementById('metric-moderados');
-            const metricMejorables = document.getElementById('metric-mejorables');
-            if (metricExitosos) metricExitosos.textContent = exitosos;
-            if (metricModerados) metricModerados.textContent = moderados;
-            if (metricMejorables) metricMejorables.textContent = mejorables;
-            
-            // Manejar score_promedio de forma segura
-            const scorePromedio = data.score_promedio !== undefined && data.score_promedio !== null 
-                ? parseFloat(data.score_promedio) 
-                : 0.0;
-            const metricScore = document.getElementById('metric-score');
-            if (metricScore) metricScore.textContent = scorePromedio.toFixed(2);
+            if (totalProyectosEl) totalProyectosEl.textContent = total;
+            if (exitososEl) exitososEl.textContent = exitosos;
+            if (moderadosEl) moderadosEl.textContent = moderados;
+            if (mejorablesEl) mejorablesEl.textContent = mejorables;
             
             // Actualizar gráfico de barras
             if (total > 0) {
@@ -1623,14 +1727,15 @@ async function updateStats() {
             updateCategoryStatsPanel();
         } else {
             // Si hay error, establecer valores por defecto
-            document.getElementById('total-proyectos').textContent = '0';
-            document.getElementById('exitosos').textContent = '0';
-            document.getElementById('moderados').textContent = '0';
-            document.getElementById('mejorables').textContent = '0';
-            document.getElementById('metric-exitosos').textContent = '0';
-            document.getElementById('metric-moderados').textContent = '0';
-            document.getElementById('metric-mejorables').textContent = '0';
-            document.getElementById('metric-score').textContent = '0.00';
+            const totalProyectosEl = document.getElementById('total-proyectos');
+            const exitososEl = document.getElementById('exitosos');
+            const moderadosEl = document.getElementById('moderados');
+            const mejorablesEl = document.getElementById('mejorables');
+            
+            if (totalProyectosEl) totalProyectosEl.textContent = '0';
+            if (exitososEl) exitososEl.textContent = '0';
+            if (moderadosEl) moderadosEl.textContent = '0';
+            if (mejorablesEl) mejorablesEl.textContent = '0';
         }
     } catch (error) {
         console.error('Error al cargar estadísticas:', error);
@@ -1723,15 +1828,20 @@ function setupEventListeners() {
         }
     });
 
-    // Toggle de información
-    document.getElementById('info-toggle').addEventListener('click', function() {
+    // Toggle de información (opcional - solo si existe)
+    const infoToggle = document.getElementById('info-toggle');
+    if (infoToggle) {
+        infoToggle.addEventListener('click', function() {
         const panel = document.getElementById('info-panel');
+            if (panel) {
         if (panel.style.display === 'none') {
             panel.style.display = 'block';
         } else {
             panel.style.display = 'none';
+                }
         }
     });
+    }
 
     // Botón de descarga
     // Botón de descarga CSV
@@ -2102,6 +2212,8 @@ function hideLoading() {
 
 // Configurar controles del mapa
 function setupMapControls() {
+    console.log('[setupMapControls] Iniciando configuración de controles del mapa...');
+    
     const styleSelect = document.getElementById('map-style-select');
     const centerBtn = document.getElementById('center-data-btn');
     const clusterToggle = document.getElementById('cluster-toggle');
@@ -2109,8 +2221,23 @@ function setupMapControls() {
     const markersToggle = document.getElementById('markers-toggle');
     const markerColorSelect = document.getElementById('marker-color-select');
     
+    console.log('[setupMapControls] Elementos encontrados:', {
+        styleSelect: !!styleSelect,
+        centerBtn: !!centerBtn,
+        clusterToggle: !!clusterToggle,
+        heatmapToggle: !!heatmapToggle,
+        markersToggle: !!markersToggle,
+        markerColorSelect: !!markerColorSelect
+    });
+    
     if (!styleSelect || !centerBtn || !clusterToggle || !heatmapToggle || !markersToggle) {
-        console.warn('No se encontraron todos los controles del mapa');
+        console.error('[setupMapControls] ERROR: No se encontraron todos los controles del mapa. Elementos faltantes:', {
+            styleSelect: !styleSelect,
+            centerBtn: !centerBtn,
+            clusterToggle: !clusterToggle,
+            heatmapToggle: !heatmapToggle,
+            markersToggle: !markersToggle
+        });
         return;
     }
     
@@ -2175,8 +2302,8 @@ function setupMapControls() {
         markerColorSelect.addEventListener('change', function() {
             markerColorCriterion = this.value;
             localStorage.setItem('markerColorCriterion', markerColorCriterion);
-            // Limpiar selección de categorías y cache de colores al cambiar criterio (estilo Power BI)
-            selectedCategoryId = null;
+            // Limpiar selección de categorías y cache de colores al cambiar criterio
+            selectedCategories.clear();
             clearColorCache();
             // Actualizar marcadores con nuevos colores
             updateMap();
@@ -2684,12 +2811,20 @@ function updateMarkerLegend() {
                 break;
                 
             case 'año':
-                if (proyecto.año) {
+                if (proyecto.año !== null && proyecto.año !== undefined && proyecto.año !== '') {
                     const año_num = parseInt(proyecto.año);
-                    if (año_num >= 2000 && año_num < 2100) {
-                        categoria = String(año_num % 100).padStart(2, '0');
+                    if (!isNaN(año_num) && año_num > 0) {
+                        if (año_num >= 2000 && año_num < 2100) {
+                            categoria = String(año_num % 100).padStart(2, '0');
+                        } else if (año_num >= 1900 && año_num < 2000) {
+                            categoria = String(año_num);
+                        } else if (año_num < 100) {
+                            categoria = String(año_num).padStart(2, '0');
+                        } else {
+                            categoria = String(año_num);
+                        }
                     } else {
-                        categoria = String(año_num);
+                        categoria = 'N/A';
                     }
                 } else {
                     categoria = 'N/A';
@@ -2704,6 +2839,16 @@ function updateMarkerLegend() {
                 
             case 'barrio':
                 categoria = String(proyecto.barrio || 'N/A').trim();
+                color = generateColorFromString(categoria);
+                break;
+                
+            case 'estrato':
+                categoria = String(proyecto.estrato || 'N/A').trim();
+                color = generateColorFromString(categoria);
+                break;
+                
+            case 'tipo_vis':
+                categoria = String(proyecto.tipo_vis || 'N/A').trim();
                 color = generateColorFromString(categoria);
                 break;
         }
@@ -2726,6 +2871,12 @@ function updateMarkerLegend() {
         if (b.nombre === 'N/A') return -1;
         if (markerColorCriterion === 'año') {
             return parseInt(a.nombre) - parseInt(b.nombre);
+        }
+        if (markerColorCriterion === 'estrato') {
+            // Ordenar numéricamente para estrato
+            const aNum = parseInt(a.nombre) || 0;
+            const bNum = parseInt(b.nombre) || 0;
+            return aNum - bNum;
         }
         return a.nombre.localeCompare(b.nombre);
     });
@@ -2776,7 +2927,7 @@ function updateMarkerLegend() {
     
     let html = '';
     filteredCategories.forEach(cat => {
-        const isSelected = selectedCategoryId === cat.id; // Selección única (estilo Power BI)
+        const isSelected = selectedCategories.has(cat.id); // Selección múltiple
         html += `
             <div class="categories-item ${isSelected ? 'selected' : ''}" data-category-id="${cat.id}">
                 <input type="checkbox" id="cat-${cat.id}" ${isSelected ? 'checked' : ''} data-category-id="${cat.id}">
@@ -2796,34 +2947,27 @@ function updateMarkerLegend() {
     
     categoriesList.innerHTML = html;
     
-    // Agregar event listeners a los checkboxes (estilo Power BI - selección única)
+    // Agregar event listeners a los checkboxes (selección múltiple)
     categoriesList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
         checkbox.addEventListener('change', function() {
             const categoryId = this.getAttribute('data-category-id');
             const item = this.closest('.categories-item');
             
             if (this.checked) {
-                // Seleccionar esta categoría (deseleccionar la anterior si existe)
-                const previousSelected = selectedCategoryId;
-                selectedCategoryId = categoryId;
-                
-                // Remover selección de la categoría anterior
-                if (previousSelected && previousSelected !== categoryId) {
-                    const previousItem = categoriesList.querySelector(`[data-category-id="${previousSelected}"]`);
-                    if (previousItem) {
-                        previousItem.classList.remove('selected');
-                        const prevCheckbox = previousItem.querySelector('input[type="checkbox"]');
-                        if (prevCheckbox) prevCheckbox.checked = false;
-                    }
-                }
-                
+                // Agregar a la selección
+                selectedCategories.add(categoryId);
                 if (item) item.classList.add('selected');
-                filterBySelectedCategory();
             } else {
-                // Deseleccionar
-                selectedCategoryId = null;
+                // Remover de la selección
+                selectedCategories.delete(categoryId);
                 if (item) item.classList.remove('selected');
+            }
+            
+            // Actualizar filtro
+            if (selectedCategories.size === 0) {
                 showAllCategories();
+            } else {
+                filterBySelectedCategories();
             }
             
             updateCategoriesCount();
@@ -2858,7 +3002,10 @@ function updateCategoryStatsPanel() {
     const categoryStatsItems = document.getElementById('category-stats-items');
     const statsSectionTitle = document.getElementById('stats-section-title');
     
+    // IMPORTANTE: Siempre mostrar TODAS las categorías, sin importar la selección
     if (!allCategories.length) return;
+    
+    console.log('[updateCategoryStatsPanel] Total categorías a mostrar:', allCategories.length);
     
     // Actualizar título de la sección
     const titulos = {
@@ -2866,7 +3013,9 @@ function updateCategoryStatsPanel() {
         'vende': 'Vendedor',
         'año': 'Año',
         'zona': 'Zona',
-        'barrio': 'Barrio'
+        'barrio': 'Barrio',
+        'estrato': 'Estrato',
+        'tipo_vis': 'Tipo VIS'
     };
     const currentTitle = titulos[markerColorCriterion] || 'Categoría';
     if (statsSectionTitle) {
@@ -2879,6 +3028,7 @@ function updateCategoryStatsPanel() {
         const sourceData = proyectosDataOriginal.length > 0 ? proyectosDataOriginal : proyectosData;
         
         // Preparar datos de categorías con estadísticas
+        // IMPORTANTE: Usar la misma función de generación de colores que el mapa para coherencia
         const categoriesWithStats = allCategories.map(cat => {
             // Calcular estadísticas para esta categoría
             const categoryProjects = sourceData.filter(proyecto => {
@@ -2892,11 +3042,23 @@ function updateCategoryStatsPanel() {
                         categoria = String(proyecto.vende || 'N/A').trim();
                         break;
                     case 'año':
-                        if (proyecto.año) {
+                        if (proyecto.año !== null && proyecto.año !== undefined && proyecto.año !== '' && proyecto.año !== 0) {
                             const año_num = parseInt(proyecto.año);
-                            categoria = año_num >= 2000 && año_num < 2100 
-                                ? String(año_num % 100).padStart(2, '0')
-                                : String(año_num);
+                            if (!isNaN(año_num) && año_num > 0) {
+                                if (año_num >= 2000 && año_num < 2100) {
+                                    categoria = String(año_num % 100).padStart(2, '0');
+                                } else if (año_num >= 1900 && año_num < 2000) {
+                                    categoria = String(año_num);
+                                } else if (año_num < 100) {
+                                    categoria = String(año_num).padStart(2, '0');
+                                } else {
+                                    categoria = String(año_num);
+                                }
+                            } else {
+                                categoria = 'N/A';
+                            }
+                        } else {
+                            categoria = 'N/A';
                         }
                         break;
                     case 'zona':
@@ -2904,6 +3066,12 @@ function updateCategoryStatsPanel() {
                         break;
                     case 'barrio':
                         categoria = String(proyecto.barrio || 'N/A').trim();
+                        break;
+                    case 'estrato':
+                        categoria = String(proyecto.estrato || 'N/A').trim();
+                        break;
+                    case 'tipo_vis':
+                        categoria = String(proyecto.tipo_vis || 'N/A').trim();
                         break;
                 }
                 
@@ -2914,26 +3082,38 @@ function updateCategoryStatsPanel() {
             const moderados = categoryProjects.filter(p => p.clasificacion === 'Moderado').length;
             const mejorables = categoryProjects.filter(p => p.clasificacion === 'Mejorable').length;
             
+            // Asegurar que el color sea el mismo que en el mapa usando la misma función
+            let categoryColor = cat.color;
+            if (categoryProjects.length > 0) {
+                // Obtener el color del primer proyecto de esta categoría usando la misma función del mapa
+                const sampleProject = categoryProjects[0];
+                categoryColor = getMarkerColor(sampleProject);
+            }
+            
             return {
                 ...cat,
+                color: categoryColor, // Usar el color generado por la misma función del mapa
                 exitosos,
                 moderados,
                 mejorables,
-                isSelected: selectedCategoryId === cat.id // Selección única (estilo Power BI)
+                isSelected: selectedCategories.has(cat.id) // Selección múltiple
             };
         });
         
-        // Aplicar búsqueda
+        // Aplicar búsqueda (NO filtrar por selección - todas las categorías deben mostrarse siempre)
         const searchInput = document.getElementById('category-stats-search');
         const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
         categorySearchQuery = searchQuery;
         
+        // IMPORTANTE: Solo filtrar por búsqueda, NO por selección
+        // Todas las categorías deben permanecer visibles, solo se resaltan las seleccionadas
         let filteredCategories = categoriesWithStats;
         if (searchQuery) {
             filteredCategories = categoriesWithStats.filter(cat => 
                 cat.nombre.toLowerCase().includes(searchQuery)
             );
         }
+        // NO filtrar por selectedCategories - todas deben mostrarse
         
         // Aplicar ordenamiento
         const sortSelect = document.getElementById('category-stats-sort');
@@ -2958,74 +3138,119 @@ function updateCategoryStatsPanel() {
             }
         });
         
-        // Generar HTML
+        // Generar HTML para tabla
         let statsHtml = '';
         if (filteredCategories.length === 0) {
-            statsHtml = '<div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div>';
+            statsHtml = '<tr><td colspan="6" class="no-results"><div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div></td></tr>';
         } else {
+            console.log('[updateCategoryStatsPanel] Renderizando', filteredCategories.length, 'categorías');
+            // Determinar si hay alguna selección para aplicar transparencia
+            const hasSelection = selectedCategories.size > 0;
+            
             filteredCategories.forEach(cat => {
+                // IMPORTANTE: Todas las categorías se renderizan siempre (estilo Power BI)
+                // Las no seleccionadas se ponen transparentes SOLO si hay alguna selección, NO desaparecen
+                const isSelected = cat.isSelected;
+                // Solo aplicar transparencia si hay selección y esta categoría no está seleccionada
+                const opacityStyle = (hasSelection && !isSelected) ? 'opacity: 0.4;' : 'opacity: 1;';
+                const dimmedClass = (hasSelection && !isSelected) ? 'dimmed' : '';
+                const rowClass = isSelected ? 'active' : '';
                 statsHtml += `
-                    <div class="category-stat-item ${cat.isSelected ? 'active' : ''}" data-category-id="${cat.id}" data-category-name="${escapeHtml(cat.nombre)}">
-                        <span class="category-stat-color" style="background-color: ${cat.color};"></span>
-                        <div class="category-stat-info">
-                            <div class="category-stat-name">${escapeHtml(cat.nombre)}</div>
-                            <div class="category-stat-details">
-                                <div class="category-stat-detail-item">
-                                    <i class="fas fa-check-circle" style="color: #27AE60;"></i>
-                                    <span>${cat.exitosos}</span>
-                                </div>
-                                <div class="category-stat-detail-item">
-                                    <i class="fas fa-exclamation-circle" style="color: #F39C12;"></i>
-                                    <span>${cat.moderados}</span>
-                                </div>
-                                <div class="category-stat-detail-item">
-                                    <i class="fas fa-times-circle" style="color: #E74C3C;"></i>
-                                    <span>${cat.mejorables}</span>
-                                </div>
+                    <tr class="category-stat-row ${rowClass} ${dimmedClass}" data-category-id="${cat.id}" data-category-name="${escapeHtml(cat.nombre)}" style="display: table-row !important; visibility: visible !important; ${opacityStyle}">
+                        <td class="td-color">
+                            <div class="category-color-icon" style="background-color: ${cat.color};" title="Color: ${cat.color}">
+                                <i class="fas fa-circle"></i>
                             </div>
-                        </div>
-                        <div class="category-stat-count">${cat.count}</div>
-                    </div>
+                        </td>
+                        <td class="td-name">
+                            <div class="category-name-cell">${escapeHtml(cat.nombre)}</div>
+                        </td>
+                        <td class="td-success">
+                            <span class="stat-badge success">
+                                <i class="fas fa-check-circle"></i>
+                                <span>${cat.exitosos}</span>
+                            </span>
+                        </td>
+                        <td class="td-moderate">
+                            <span class="stat-badge moderate">
+                                <i class="fas fa-exclamation-circle"></i>
+                                <span>${cat.moderados}</span>
+                            </span>
+                        </td>
+                        <td class="td-improve">
+                            <span class="stat-badge improve">
+                                <i class="fas fa-times-circle"></i>
+                                <span>${cat.mejorables}</span>
+                            </span>
+                        </td>
+                        <td class="td-count">
+                            <span class="count-badge">${cat.count}</span>
+                        </td>
+                    </tr>
                 `;
             });
         }
         
         categoryStatsItems.innerHTML = statsHtml;
         
-        // Agregar event listeners para filtrar al hacer click (estilo Power BI)
-        categoryStatsItems.querySelectorAll('.category-stat-item').forEach(item => {
-            item.addEventListener('click', function() {
+        // Agregar event listeners para filtrar al hacer click (selección múltiple con Ctrl)
+        categoryStatsItems.querySelectorAll('.category-stat-row').forEach(item => {
+            item.addEventListener('click', function(e) {
                 const categoryId = this.getAttribute('data-category-id');
                 const categoryName = this.getAttribute('data-category-name');
                 
-                // Toggle estilo Power BI: si ya estaba seleccionado, deseleccionar; si no, seleccionar (y deseleccionar la anterior)
-                const wasSelected = selectedCategoryId === categoryId;
+                // Detectar si se presionó Ctrl (o Cmd en Mac)
+                const isCtrlPressed = e.ctrlKey || e.metaKey;
+                const wasSelected = selectedCategories.has(categoryId);
                 
-                if (wasSelected) {
-                    // Deseleccionar: remover la selección
-                    selectedCategoryId = null;
-                    this.classList.remove('active');
-                    
-                    // Restaurar todo (mostrar todos los proyectos)
-                    showAllCategories();
-                } else {
-                    // Seleccionar esta categoría (deseleccionar la anterior si existe)
-                    const previousSelected = selectedCategoryId;
-                    selectedCategoryId = categoryId;
-                    
-                    // Remover resaltado de la categoría anterior
-                    if (previousSelected) {
-                        const previousItem = categoryStatsItems.querySelector(`[data-category-id="${previousSelected}"]`);
-                        if (previousItem) {
-                            previousItem.classList.remove('active');
-                        }
+                if (isCtrlPressed) {
+                    // Selección múltiple: toggle de esta categoría sin afectar las demás
+                    if (wasSelected) {
+                        // Deseleccionar esta categoría
+                        selectedCategories.delete(categoryId);
+                        this.classList.remove('active');
+                    } else {
+                        // Agregar a la selección
+                        selectedCategories.add(categoryId);
+                        this.classList.add('active');
                     }
                     
-                    // Resaltar la nueva categoría seleccionada
-                    this.classList.add('active');
+                    // Actualizar filtro con todas las categorías seleccionadas
+                    if (selectedCategories.size === 0) {
+                        showAllCategories();
+                    } else {
+                        filterBySelectedCategories();
+                    }
                     
-                    // Filtrar para mostrar solo los proyectos de esta categoría
-                    filterBySelectedCategory();
+                    // Solo actualizar estados visuales (NO regenerar HTML - todas las filas permanecen visibles)
+                    updateCategoryStatsItemsState();
+                    updateCategoriesCount();
+                } else {
+                    // Sin Ctrl: selección única (reemplazar selección anterior)
+                    if (wasSelected && selectedCategories.size === 1) {
+                        // Si solo esta estaba seleccionada, deseleccionar todo
+                        selectedCategories.clear();
+                        this.classList.remove('active');
+                        showAllCategories();
+                    } else {
+                        // Limpiar selección anterior y seleccionar solo esta
+                        selectedCategories.clear();
+                        // Remover resaltado de todas las categorías
+                        categoryStatsItems.querySelectorAll('.category-stat-row').forEach(i => {
+                            i.classList.remove('active');
+                        });
+                        
+                        // Seleccionar esta categoría
+                        selectedCategories.add(categoryId);
+                        this.classList.add('active');
+                        
+                        // Filtrar para mostrar solo los proyectos de esta categoría
+                        filterBySelectedCategories();
+                        
+                        // Solo actualizar estados visuales (NO regenerar HTML - todas las filas permanecen visibles)
+                        updateCategoryStatsItemsState();
+                        updateCategoriesCount();
+                    }
                 }
             });
         });
@@ -3089,15 +3314,15 @@ function setupCategoryStatsControls() {
     }
 }
 
-// Filtrar mapa por categoría seleccionada (estilo Power BI - selección única)
-function filterBySelectedCategory() {
-    if (!selectedCategoryId) {
+// Filtrar mapa por categorías seleccionadas (selección múltiple)
+function filterBySelectedCategories() {
+    if (selectedCategories.size === 0) {
         showAllCategories();
         return;
     }
     
     // Filtrar los datos como lo hacen los filtros normales
-    // Mostrar SOLO los proyectos de la categoría seleccionada
+    // Mostrar SOLO los proyectos de las categorías seleccionadas
     const sourceData = proyectosDataOriginal.length > 0 ? proyectosDataOriginal : proyectosData;
     
     proyectosData = sourceData.filter(proyecto => {
@@ -3111,11 +3336,23 @@ function filterBySelectedCategory() {
                 categoria = String(proyecto.vende || 'N/A').trim();
                 break;
             case 'año':
-                if (proyecto.año) {
+                if (proyecto.año !== null && proyecto.año !== undefined && proyecto.año !== '') {
                     const año_num = parseInt(proyecto.año);
-                    categoria = año_num >= 2000 && año_num < 2100 
-                        ? String(año_num % 100).padStart(2, '0')
-                        : String(año_num);
+                    if (!isNaN(año_num) && año_num > 0) {
+                        if (año_num >= 2000 && año_num < 2100) {
+                            categoria = String(año_num % 100).padStart(2, '0');
+                        } else if (año_num >= 1900 && año_num < 2000) {
+                            categoria = String(año_num);
+                        } else if (año_num < 100) {
+                            categoria = String(año_num).padStart(2, '0');
+                        } else {
+                            categoria = String(año_num);
+                        }
+                    } else {
+                        categoria = 'N/A';
+                    }
+                } else {
+                    categoria = 'N/A';
                 }
                 break;
             case 'zona':
@@ -3124,10 +3361,16 @@ function filterBySelectedCategory() {
             case 'barrio':
                 categoria = String(proyecto.barrio || 'N/A').trim();
                 break;
+            case 'estrato':
+                categoria = String(proyecto.estrato || 'N/A').trim();
+                break;
+            case 'tipo_vis':
+                categoria = String(proyecto.tipo_vis || 'N/A').trim();
+                break;
         }
         
         const catId = categoria.toLowerCase().replace(/\s+/g, '-');
-        return catId === selectedCategoryId;
+        return selectedCategories.has(catId);
     });
     
     // Actualizar todas las vistas con los datos filtrados
@@ -3142,39 +3385,56 @@ function filterBySelectedCategory() {
     updateStats();
     updateCategoriesCount();
     
-    // Actualizar estados visuales de los items
+    // Actualizar estados visuales de los items (sin ocultar filas, solo resaltar)
+    // NO llamar a updateCategoryStatsPanel() aquí para evitar regenerar el HTML
+    // Solo actualizar las clases CSS de las filas existentes
     updateCategoryStatsItemsState();
 }
 
-// Filtrar mapa por categorías seleccionadas (como los filtros normales)
-// Esta función ya no se usa, reemplazada por filterBySelectedCategory (selección única)
-// Se mantiene por compatibilidad pero no debería ser llamada
-function filterBySelectedCategories() {
-    // Redirigir a la nueva función de selección única
-    filterBySelectedCategory();
+// Alias para compatibilidad (ahora filterBySelectedCategories es la función principal)
+function filterBySelectedCategory() {
+    filterBySelectedCategories();
 }
 
 
-// Actualizar estados visuales de los items de categorías (estilo Power BI)
+// Actualizar estados visuales de los items de categorías (estilo Power BI - transparencia)
 function updateCategoryStatsItemsState() {
     const categoryStatsItems = document.getElementById('category-stats-items');
     if (!categoryStatsItems) return;
     
-    categoryStatsItems.querySelectorAll('.category-stat-item').forEach(item => {
+    const hasSelection = selectedCategories.size > 0;
+    
+    categoryStatsItems.querySelectorAll('.category-stat-row').forEach(item => {
         const categoryId = item.getAttribute('data-category-id');
-        // Solo una categoría puede estar activa (selección única)
-        if (selectedCategoryId === categoryId) {
+        const isSelected = selectedCategories.has(categoryId);
+        
+        // Estilo Power BI: seleccionadas opacas, no seleccionadas transparentes
+        if (isSelected) {
             item.classList.add('active');
+            item.classList.remove('dimmed');
+            item.style.opacity = '1';
+            item.style.display = 'table-row';
+            item.style.visibility = 'visible';
         } else {
             item.classList.remove('active');
+            // Solo aplicar transparencia si hay alguna selección
+            if (hasSelection) {
+                item.classList.add('dimmed');
+                item.style.opacity = '0.4';
+            } else {
+                item.classList.remove('dimmed');
+                item.style.opacity = '1';
+            }
+            item.style.display = 'table-row';
+            item.style.visibility = 'visible';
         }
     });
 }
 
-// Mostrar todas las categorías (restaurar vista completa - estilo Power BI)
+// Mostrar todas las categorías (restaurar vista completa)
 function showAllCategories() {
     // Limpiar la selección
-    selectedCategoryId = null;
+    selectedCategories.clear();
     
     // Restaurar datos originales si existen
     if (proyectosDataOriginal.length > 0) {
@@ -3198,17 +3458,75 @@ function showAllCategories() {
     updateCategoryStatsPanel();
 }
 
-// Actualizar contador de categorías seleccionadas (estilo Power BI)
+// Actualizar contador de categorías seleccionadas (selección múltiple)
 function updateCategoriesCount() {
     const countElement = document.getElementById('categories-count');
     if (countElement) {
-        // Solo puede haber una categoría seleccionada (o ninguna)
-        if (selectedCategoryId) {
-            countElement.textContent = '1 seleccionada';
+        const count = selectedCategories.size;
+        if (count > 0) {
+            countElement.textContent = `${count} seleccionada${count !== 1 ? 's' : ''}`;
         } else {
             countElement.textContent = 'Ninguna';
         }
     }
+}
+
+// Configurar toggle de vista compacta/completa de la tabla
+function setupCategoryTableToggle() {
+    const toggleBtn = document.getElementById('category-table-toggle');
+    const toggleIcon = document.getElementById('category-table-toggle-icon');
+    const table = document.querySelector('.category-stats-table');
+    
+    if (!toggleBtn) return;
+    
+    // Si la tabla aún no existe, esperar a que se cree
+    if (!table) {
+        setTimeout(setupCategoryTableToggle, 100);
+        return;
+    }
+    
+    // Cargar estado desde localStorage (por defecto: compacto)
+    const savedMode = localStorage.getItem('categoryTableMode') || 'compact';
+    if (savedMode === 'full') {
+        table.classList.remove('compact');
+        table.classList.add('full');
+        if (toggleIcon) {
+            toggleIcon.classList.remove('fa-compress-alt');
+            toggleIcon.classList.add('fa-expand-alt');
+        }
+    } else {
+        table.classList.remove('full');
+        table.classList.add('compact');
+        if (toggleIcon) {
+            toggleIcon.classList.remove('fa-expand-alt');
+            toggleIcon.classList.add('fa-compress-alt');
+        }
+    }
+    
+    // Event listener para toggle
+    toggleBtn.addEventListener('click', function() {
+        const isCompact = table.classList.contains('compact');
+        
+        if (isCompact) {
+            // Cambiar a modo completo
+            table.classList.remove('compact');
+            table.classList.add('full');
+            if (toggleIcon) {
+                toggleIcon.classList.remove('fa-compress-alt');
+                toggleIcon.classList.add('fa-expand-alt');
+            }
+            localStorage.setItem('categoryTableMode', 'full');
+        } else {
+            // Cambiar a modo compacto
+            table.classList.remove('full');
+            table.classList.add('compact');
+            if (toggleIcon) {
+                toggleIcon.classList.remove('fa-expand-alt');
+                toggleIcon.classList.add('fa-compress-alt');
+            }
+            localStorage.setItem('categoryTableMode', 'compact');
+        }
+    });
 }
 
 // Configurar panel de categorías (ahora en el sidebar)
@@ -3219,35 +3537,36 @@ function setupCategoriesPanel() {
     const searchInput = document.getElementById('categories-search');
     const searchClear = document.getElementById('categories-search-clear');
     
-    // Seleccionar todas (no aplicable en selección única, pero mantener para compatibilidad)
+    // Seleccionar todas (selección múltiple)
     if (selectAllBtn) {
         selectAllBtn.addEventListener('click', function(e) {
             e.stopPropagation();
-            // En selección única, no tiene sentido "seleccionar todas"
-            // Simplemente no hacer nada o mostrar un mensaje
-            console.log('Selección única activa: solo se puede seleccionar una categoría a la vez');
+            allCategories.forEach(cat => {
+                selectedCategories.add(cat.id);
+            });
+            updateCategoriesList();
+            updateCategoriesCount();
+            filterBySelectedCategories();
         });
     }
     
-    // Deseleccionar todas (estilo Power BI)
+    // Deseleccionar todas
     if (deselectAllBtn) {
         deselectAllBtn.addEventListener('click', function(e) {
             e.stopPropagation();
-            selectedCategoryId = null;
+            selectedCategories.clear();
             showAllCategories();
             updateCategoriesList();
             updateCategoriesCount();
         });
     }
     
-    // Aplicar filtros (ya no necesario con selección única, pero mantener para compatibilidad)
+    // Aplicar filtros (el filtro se aplica automáticamente, pero mantener para compatibilidad)
     if (applyBtn) {
         applyBtn.addEventListener('click', function(e) {
             e.stopPropagation();
-            // Con selección única, el filtro se aplica automáticamente al seleccionar
-            // Esta función ya no es necesaria pero se mantiene por compatibilidad
-            if (selectedCategoryId) {
-                filterBySelectedCategory();
+            if (selectedCategories.size > 0) {
+                filterBySelectedCategories();
             } else {
                 showAllCategories();
             }
@@ -3296,7 +3615,7 @@ function updateCategoriesList() {
     
     let html = '';
     filteredCategories.forEach(cat => {
-        const isSelected = selectedCategoryId === cat.id; // Selección única (estilo Power BI)
+        const isSelected = selectedCategories.has(cat.id); // Selección múltiple
         html += `
             <div class="categories-item ${isSelected ? 'selected' : ''}" data-category-id="${cat.id}">
                 <input type="checkbox" id="cat-${cat.id}" ${isSelected ? 'checked' : ''} data-category-id="${cat.id}">
@@ -3312,34 +3631,27 @@ function updateCategoriesList() {
     
     categoriesList.innerHTML = html;
     
-    // Agregar event listeners (estilo Power BI - selección única)
+    // Agregar event listeners (selección múltiple)
     categoriesList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
         checkbox.addEventListener('change', function() {
             const categoryId = this.getAttribute('data-category-id');
             const item = this.closest('.categories-item');
             
             if (this.checked) {
-                // Seleccionar esta categoría (deseleccionar la anterior si existe)
-                const previousSelected = selectedCategoryId;
-                selectedCategoryId = categoryId;
-                
-                // Remover selección de la categoría anterior
-                if (previousSelected && previousSelected !== categoryId) {
-                    const previousItem = categoriesList.querySelector(`[data-category-id="${previousSelected}"]`);
-                    if (previousItem) {
-                        previousItem.classList.remove('selected');
-                        const prevCheckbox = previousItem.querySelector('input[type="checkbox"]');
-                        if (prevCheckbox) prevCheckbox.checked = false;
-                    }
-                }
-                
+                // Agregar a la selección
+                selectedCategories.add(categoryId);
                 if (item) item.classList.add('selected');
-                filterBySelectedCategory();
             } else {
-                // Deseleccionar
-                selectedCategoryId = null;
+                // Remover de la selección
+                selectedCategories.delete(categoryId);
                 if (item) item.classList.remove('selected');
+            }
+            
+            // Actualizar filtro
+            if (selectedCategories.size === 0) {
                 showAllCategories();
+            } else {
+                filterBySelectedCategories();
             }
             
             updateCategoriesCount();
@@ -3359,12 +3671,11 @@ function updateCategoriesList() {
     });
 }
 
-// Aplicar filtros de categorías (estilo Power BI - selección única)
+// Aplicar filtros de categorías (selección múltiple)
 function applyCategoryFilters() {
-    // Con selección única, el filtro se aplica automáticamente
-    // Esta función se mantiene por compatibilidad
-    if (selectedCategoryId) {
-        filterBySelectedCategory();
+    // El filtro se aplica automáticamente, pero mantener para compatibilidad
+    if (selectedCategories.size > 0) {
+        filterBySelectedCategories();
     } else {
         showAllCategories();
     }

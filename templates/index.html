@@ -240,8 +240,13 @@
                             <!-- Lista de categorías con colores y estadísticas -->
                             <div class="category-stats-list" id="category-stats-list">
                                 <div class="category-stats-header">
-                                    <i class="fas fa-list-ul"></i>
-                                    <span>Distribución por Categoría</span>
+                                    <div class="category-stats-header-left">
+                                        <i class="fas fa-list-ul"></i>
+                                        <span>Distribución por Categoría</span>
+                                    </div>
+                                    <button type="button" id="category-table-toggle" class="category-table-toggle" title="Alternar vista compacta/completa">
+                                        <i class="fas fa-compress-alt" id="category-table-toggle-icon"></i>
+                                    </button>
                                 </div>
                                 
                                 <!-- Buscador y controles de ordenamiento -->
@@ -267,8 +272,22 @@
                                     </div>
                                 </div>
                                 
-                                <div class="category-stats-items" id="category-stats-items">
-                                    <!-- Se llenará dinámicamente -->
+                                <div class="category-stats-table-wrapper">
+                                    <table class="category-stats-table compact">
+                                        <thead>
+                                            <tr>
+                                                <th class="th-color"><i class="fas fa-palette"></i></th>
+                                                <th class="th-name">Categoría</th>
+                                                <th class="th-success"><i class="fas fa-check-circle"></i></th>
+                                                <th class="th-moderate"><i class="fas fa-exclamation-circle"></i></th>
+                                                <th class="th-improve"><i class="fas fa-times-circle"></i></th>
+                                                <th class="th-count">Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="category-stats-items">
+                                            <!-- Se llenará dinámicamente -->
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                             
@@ -350,68 +369,6 @@
 
         <!-- Contenido principal -->
         <main class="main-content">
-            <!-- Sección de información -->
-            <div class="info-section">
-                <div class="info-header">
-                    <h2><i class="fas fa-chart-line"></i> Visualización de proyectos clasificados por desempeño</h2>
-                    <button class="info-toggle" id="info-toggle">
-                        <i class="fas fa-info-circle"></i> Información
-                    </button>
-                </div>
-                
-                <div class="info-panel" id="info-panel" style="display: none;">
-                    <h3><i class="fas fa-chart-bar"></i> Método de Clasificación de Proyectos</h3>
-                    <p>Los proyectos se clasifican mediante un <strong>Score de Éxito</strong> que combina múltiples métricas de desempeño.</p>
-                    
-                    <div class="classification-cards">
-                        <div class="card-success">
-                            <h4><i class="fas fa-check-circle"></i> PROYECTOS EXITOSOS</h4>
-                            <p><strong>Score:</strong> 0.62-0.79 (promedio: 0.68)</p>
-                            <p><strong>Velocidad:</strong> Alta - 22+ unidades/mes</p>
-                            <p><strong>Patrón:</strong> Acelerado o Constante</p>
-                        </div>
-                        
-                        <div class="card-moderate">
-                            <h4><i class="fas fa-exclamation-circle"></i> PROYECTOS MODERADOS</h4>
-                            <p><strong>Score:</strong> 0.50-0.62 (promedio: 0.55)</p>
-                            <p><strong>Velocidad:</strong> Media - 8-9 unidades/mes</p>
-                            <p><strong>Patrón:</strong> Constante o Desacelerado</p>
-                        </div>
-                        
-                        <div class="card-improve">
-                            <h4><i class="fas fa-times-circle"></i> PROYECTOS MEJORABLES</h4>
-                            <p><strong>Score:</strong> 0.21-0.50 (promedio: 0.44)</p>
-                            <p><strong>Velocidad:</strong> Baja o decreciente</p>
-                            <p><strong>Patrón:</strong> Constante o Desacelerado</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Métricas principales -->
-            <div class="metrics-grid">
-                <div class="metric-card metric-success">
-                    <div class="metric-icon"><i class="fas fa-check-circle"></i></div>
-                    <div class="metric-label">Exitosos</div>
-                    <div class="metric-value" id="metric-exitosos">0</div>
-                </div>
-                <div class="metric-card metric-moderate">
-                    <div class="metric-icon"><i class="fas fa-exclamation-circle"></i></div>
-                    <div class="metric-label">Moderados</div>
-                    <div class="metric-value" id="metric-moderados">0</div>
-                </div>
-                <div class="metric-card metric-improve">
-                    <div class="metric-icon"><i class="fas fa-times-circle"></i></div>
-                    <div class="metric-label">Mejorables</div>
-                    <div class="metric-value" id="metric-mejorables">0</div>
-                </div>
-                <div class="metric-card metric-score">
-                    <div class="metric-icon"><i class="fas fa-star"></i></div>
-                    <div class="metric-label">Score Promedio</div>
-                    <div class="metric-value" id="metric-score">0.00</div>
-                </div>
-            </div>
-
             <!-- Mapa y Ranking de Constructores -->
             <div class="map-constructors-container">
                 <!-- Mapa -->
@@ -458,6 +415,8 @@
                                             <option value="año">📅 Año</option>
                                             <option value="zona">🗺️ Zona</option>
                                             <option value="barrio">🏘️ Barrio</option>
+                                            <option value="estrato">🏢 Estrato</option>
+                                            <option value="tipo_vis">🏠 Tipo VIS</option>
                                         </select>
                                         <i class="fas fa-chevron-down select-arrow"></i>
                                     </div>

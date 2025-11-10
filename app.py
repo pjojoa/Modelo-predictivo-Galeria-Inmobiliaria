@@ -112,7 +112,7 @@ def get_color_by_clasificacion(clasificacion):
     # Si no es válida, usar 'Moderado' como defecto (naranja) en lugar de gris
     return COLORES_CLASIFICACION.get('Moderado', '#F39C12')
 
-def apply_filters(df, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado='Activos'):
+def apply_filters(df, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado='Activos', vende=None):
     """Aplica filtros al DataFrame de manera eficiente usando máscaras booleanas."""
     if df.empty:
         return df
@@ -122,9 +122,9 @@ def apply_filters(df, clasificacion, zona, barrio, tipo_vis, precio_min, precio_
     
     # Filtro de estado (activo/inactivo)
     if estado and estado != 'Todos' and 'Unidades_Disponibles' in df.columns:
-        if estado == 'Activos':
+            if estado == 'Activos':
             mask &= (df['Unidades_Disponibles'] > 0)
-        elif estado == 'Inactivos':
+            elif estado == 'Inactivos':
             mask &= (df['Unidades_Disponibles'] == 0)
     
     # Filtro de clasificación
@@ -139,27 +139,37 @@ def apply_filters(df, clasificacion, zona, barrio, tipo_vis, precio_min, precio_
     if barrio and barrio != 'Todos' and 'Barrio' in df.columns:
         mask &= (df['Barrio'] == barrio)
     
-    # Filtro de tipo VIS
-    if tipo_vis and tipo_vis != 'Todos' and 'Tipo_VIS_Principal' in df.columns:
-        mask &= (df['Tipo_VIS_Principal'] == tipo_vis)
+    # Filtro de tipo VIS - buscar en múltiples variantes de nombre de columna
+    if tipo_vis and tipo_vis != 'Todos':
+        tipo_vis_col = None
+        for col_name in ['Tipo VIS', 'Tipo_VIS', 'Tipo_VIS_Principal', 'TipoVIS']:
+            if col_name in df.columns:
+                tipo_vis_col = col_name
+                break
+        if tipo_vis_col:
+            mask &= (df[tipo_vis_col] == tipo_vis)
+    
+    # Filtro de vendedor
+    if vende and vende != 'Todos' and 'Vende' in df.columns:
+        mask &= (df['Vende'] == vende)
     
     # Filtros de precio (combinados en una sola operación)
     if 'Precio_Promedio' in df.columns:
         precio_mask = df['Precio_Promedio'].notna()
         
         if precio_min and precio_min not in ('', 'null'):
-            try:
-                precio_min_val = float(precio_min)
+        try:
+            precio_min_val = float(precio_min)
                 precio_mask &= (df['Precio_Promedio'] >= precio_min_val)
-            except (ValueError, TypeError):
-                pass
-        
+        except (ValueError, TypeError):
+            pass
+    
         if precio_max and precio_max not in ('', 'null'):
-            try:
-                precio_max_val = float(precio_max)
+        try:
+            precio_max_val = float(precio_max)
                 precio_mask &= (df['Precio_Promedio'] <= precio_max_val)
-            except (ValueError, TypeError):
-                pass
+        except (ValueError, TypeError):
+            pass
     
         mask &= precio_mask
     
@@ -600,83 +610,106 @@ def proyecto_to_dict(row):
     if vende in ('nan', '', 'none', 'None'):
         vende = 'N/A'
     
-    # Extraer año de fecha de inicio
+    # Extraer año de fecha de inicio - MEJORADO EXHAUSTIVAMENTE
     # Los últimos 2 dígitos indican el año desde 2000 (00 = 2000, 23 = 2023, etc.)
     año = None
     fecha_inicio = row.get('Fecha_Inicio', None)
-    if pd.notna(fecha_inicio):
+    
+    if pd.notna(fecha_inicio) and fecha_inicio not in ('', 'nan', 'None', None):
         try:
-            # Intentar parsear como datetime
-            if isinstance(fecha_inicio, str):
-                from datetime import datetime
-                # Intentar diferentes formatos comunes
-                for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%Y/%m/%d', '%d-%m-%Y', '%Y-%d-%m', '%d/%m/%y', '%y-%m-%d']:
-                    try:
-                        fecha_inicio = datetime.strptime(fecha_inicio, fmt)
-                        break
-                    except:
-                        continue
-            # Si es datetime o Timestamp, extraer año
-            if hasattr(fecha_inicio, 'year'):
-                año_completo = int(fecha_inicio.year)
-                # Si el año es menor a 100, asumir que son los últimos 2 dígitos desde 2000
-                if año_completo < 100:
-                    año = 2000 + año_completo
+            # PRIMER INTENTO: Si ya es un número (año directo)
+            if isinstance(fecha_inicio, (int, float)):
+                año_num = int(fecha_inicio)
+                if 1900 <= año_num <= 2100:
+                    año = año_num
+                elif 0 <= año_num < 100:
+                    año = 2000 + año_num
                 else:
-                    año = año_completo
+                    año = None
+            # SEGUNDO INTENTO: Intentar parsear como datetime usando pandas (más robusto)
             elif isinstance(fecha_inicio, pd.Timestamp):
                 año_completo = int(fecha_inicio.year)
                 if año_completo < 100:
                     año = 2000 + año_completo
                 else:
                     año = año_completo
-        except:
-            # Si falla, intentar extraer año de string
-            try:
-                fecha_str = str(fecha_inicio).strip()
-                # Buscar los últimos 2 dígitos que podrían ser el año
-                # Intentar diferentes patrones
-                import re
-                # Buscar patrón de 2 dígitos al final o en formato de fecha
-                patrones = [
-                    r'(\d{2})$',  # Últimos 2 dígitos
-                    r'/(\d{2})$',  # Últimos 2 dígitos después de /
-                    r'-(\d{2})$',  # Últimos 2 dígitos después de -
-                    r'(\d{4})$',  # Últimos 4 dígitos (año completo)
-                ]
-                
-                año_encontrado = None
-                for patron in patrones:
-                    match = re.search(patron, fecha_str)
-                    if match:
-                        año_str = match.group(1)
-                        if año_str.isdigit():
-                            año_num = int(año_str)
-                            # Si son 2 dígitos, asumir desde 2000
-                            if len(año_str) == 2:
-                                año_encontrado = 2000 + año_num
-                            elif len(año_str) == 4:
-                                año_encontrado = año_num
-                            break
-                
-                if año_encontrado:
-                    año = año_encontrado
+            # TERCER INTENTO: Convertir a datetime con pandas (maneja más formatos)
+            else:
+                fecha_parsed = pd.to_datetime(fecha_inicio, errors='coerce', infer_datetime_format=True)
+                if pd.notna(fecha_parsed):
+                    año_completo = int(fecha_parsed.year)
+                    if año_completo < 100:
+                        año = 2000 + año_completo
+                    else:
+                        año = año_completo
                 else:
-                    # Fallback: intentar los primeros 4 dígitos
-                    año_str = fecha_str[:4]
-                    if año_str.isdigit():
-                        año_num = int(año_str)
-                        if año_num < 100:
-                            año = 2000 + año_num
-                        else:
-                            año = año_num
-            except:
-                año = None
+                    # CUARTO INTENTO: Extraer año de string con regex (más exhaustivo)
+                    import re
+                    fecha_str = str(fecha_inicio).strip()
+                    
+                    # Patrones más exhaustivos para encontrar el año
+                    patrones = [
+                        r'(\d{4})',  # Cualquier año de 4 dígitos (prioridad)
+                        r'/(\d{4})/',  # Año de 4 dígitos entre barras
+                        r'-(\d{4})-',  # Año de 4 dígitos entre guiones
+                        r'(\d{2})$',  # Últimos 2 dígitos al final
+                        r'/(\d{2})$',  # Últimos 2 dígitos después de /
+                        r'-(\d{2})$',  # Últimos 2 dígitos después de -
+                        r'^(\d{4})',  # Primeros 4 dígitos al inicio
+                        r'^(\d{2})',  # Primeros 2 dígitos al inicio
+                    ]
+                    
+                    año_encontrado = None
+                    for patron in patrones:
+                        matches = re.findall(patron, fecha_str)
+                        if matches:
+                            for match in matches:
+                                if match.isdigit():
+                                    año_str = match
+                                    año_num = int(año_str)
+                                    # Si son 4 dígitos y está en rango válido
+                                    if len(año_str) == 4 and 1900 <= año_num <= 2100:
+                                        año_encontrado = año_num
+                                        break
+                                    # Si son 2 dígitos, asumir desde 2000
+                                    elif len(año_str) == 2 and 0 <= año_num < 100:
+                                        año_encontrado = 2000 + año_num
+                                        break
+                            if año_encontrado:
+                                break
+                    
+                    if año_encontrado:
+                        año = año_encontrado
+                    else:
+                        # ÚLTIMO INTENTO: Buscar cualquier secuencia de 2-4 dígitos
+                        digitos = re.findall(r'\d{2,4}', fecha_str)
+                        if digitos:
+                            for digito_str in digitos:
+                                digito_num = int(digito_str)
+                                if len(digito_str) == 4 and 1900 <= digito_num <= 2100:
+                                    año = digito_num
+                                    break
+                                elif len(digito_str) == 2 and 0 <= digito_num < 100:
+                                    año = 2000 + digito_num
+                                    break
+        except Exception as e:
+            # Log del error para debugging
+            print(f"[DEBUG] Error extrayendo año de '{fecha_inicio}': {str(e)}")
+            año = None
     
     # Pre-calcular valores para evitar múltiples accesos
     precio = row.get('Precio_Promedio', 0)
     lat = row.get('Lat', 0)
     lon = row.get('Lon', 0)
+    
+    # Tipo VIS: buscar en múltiples variantes de nombre de columna (prioridad: "Tipo VIS" con espacio)
+    tipo_vis_val = 'N/A'
+    for col_name in ['Tipo VIS', 'Tipo_VIS', 'Tipo_VIS_Principal', 'TipoVIS']:
+        if col_name in row.index:
+            val = row.get(col_name, None)
+            if pd.notna(val) and str(val).strip() not in ('', 'nan', 'None'):
+                tipo_vis_val = str(val).strip()
+                break
     
     return {
         'id': str(row.name),
@@ -688,8 +721,9 @@ def proyecto_to_dict(row):
         'barrio': str(row.get('Barrio', 'N/A')),
         'zona': str(row.get('Zona', 'N/A')),
         'estrato': str(row.get('Estrato', 'N/A')) if pd.notna(row.get('Estrato')) and pd.to_numeric(row.get('Estrato', 0), errors='coerce') != 0 else 'N/A',
+        'tipo_vis': tipo_vis_val,
         'vende': vende,
-        'año': año if año else None,
+        'año': int(año) if año else None,  # Asegurar que sea int, no None
         'precio_promedio': float(precio) if pd.notna(precio) else 0,
         'precio_formateado': format_currency(precio),
         'area_promedio': float(row.get('Area_Promedio', 0)) if pd.notna(row.get('Area_Promedio')) else 0,
@@ -767,8 +801,14 @@ def get_filtros_options():
         else:
             barrios = []
         
-        if 'Tipo_VIS_Principal' in df_data.columns:
-            tipos_vis = sorted(df_data['Tipo_VIS_Principal'].dropna().unique())
+        # Buscar columna Tipo VIS en múltiples variantes
+        tipo_vis_col = None
+        for col_name in ['Tipo VIS', 'Tipo_VIS', 'Tipo_VIS_Principal', 'TipoVIS']:
+            if col_name in df_data.columns:
+                tipo_vis_col = col_name
+                break
+        if tipo_vis_col:
+            tipos_vis = sorted(df_data[tipo_vis_col].dropna().unique())
             tipos_vis = [v for v in tipos_vis if v and str(v) not in ('', 'N/A', 'nan')]
         else:
             tipos_vis = []
@@ -776,8 +816,8 @@ def get_filtros_options():
         # Calcular precios de forma más eficiente
         if 'Precio_Promedio' in df_data.columns:
             precios_validos = df_data['Precio_Promedio'].dropna()
-            precio_min = float(precios_validos.min()) if len(precios_validos) > 0 else 0
-            precio_max = float(precios_validos.max()) if len(precios_validos) > 0 else 0
+        precio_min = float(precios_validos.min()) if len(precios_validos) > 0 else 0
+        precio_max = float(precios_validos.max()) if len(precios_validos) > 0 else 0
         else:
             precio_min = precio_max = 0
         
@@ -870,14 +910,15 @@ def get_proyectos():
         precio_min = request.args.get('precio_min', None)
         precio_max = request.args.get('precio_max', None)
         estado = request.args.get('estado', 'Activos')  # Por defecto: Activos
+        vende = request.args.get('vende', None)
         
         # Aplicar filtros
-        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado)
+        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado, vende)
         
         # Convertir a JSON de manera eficiente
         # Usar to_dict('records') es más rápido que iterrows para DataFrames pequeños/medianos
         if len(df_filtered) < 1000:
-            proyectos = [proyecto_to_dict(row) for _, row in df_filtered.iterrows()]
+        proyectos = [proyecto_to_dict(row) for _, row in df_filtered.iterrows()]
         else:
             # Para datasets grandes, usar vectorización parcial
             proyectos = df_filtered.apply(proyecto_to_dict, axis=1).tolist()
@@ -1011,9 +1052,10 @@ def get_dataset_completo():
         precio_min = request.args.get('precio_min', None)
         precio_max = request.args.get('precio_max', None)
         estado = request.args.get('estado', 'Activos')  # Por defecto: Activos
+        vende = request.args.get('vende', None)
         
         # Aplicar filtros
-        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado)
+        df_filtered = apply_filters(df_data, clasificacion, zona, barrio, tipo_vis, precio_min, precio_max, estado, vende)
         
         # Convertir TODAS las columnas a JSON
         # Usar to_dict('records') para preservar todas las columnas
