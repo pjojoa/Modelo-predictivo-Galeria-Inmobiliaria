@@ -10,6 +10,13 @@
     --success-color: #27AE60;
     --moderate-color: #F39C12;
     --improve-color: #E74C3C;
+    
+    /* Variables para panel off-canvas */
+    --panel-width: 418px; /* 380px + 10% = 418px */
+    --panel-ease: 240ms ease;
+    --z-panel: 10000; /* Z-index muy alto para estar sobre todo, incluyendo controles de Leaflet */
+    --z-backdrop: 900;
+    --z-toggle: 10001; /* Por encima del panel */
 }
 
 /* Reset y estilos base */
@@ -62,48 +69,219 @@ body {
 /* Contenedor principal */
 .main-container {
     display: flex;
-    gap: 2rem;
+    gap: 0; /* Eliminado gap para que el panel no ocupe espacio */
     max-width: 100%;
     padding: 0 1rem;
+    position: relative;
+    overflow: visible; /* Asegurar que el panel fixed no se corte */
 }
 
-/* Sidebar - Diseño Moderno e Innovador */
+/* Sidebar - Panel Off-Canvas Deslizante */
 .sidebar {
-    width: 380px;
+    width: var(--panel-width);
     min-width: 280px;
-    max-width: 600px;
+    max-width: 90vw; /* Permitir más ancho */
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.95) 100%);
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border-radius: 16px;
+    border-radius: 0 16px 16px 0;
     padding: 0;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.18),
+                0 8px 32px rgba(0, 0, 0, 0.12), 
                 0 2px 8px rgba(0, 0, 0, 0.08),
                 inset 0 1px 0 rgba(255, 255, 255, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.3);
-    height: calc(100vh - 120px);
-    max-height: 95vh;
-    min-height: 600px;
-    position: sticky;
-    top: 1rem;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    height: 100dvh;
+    position: fixed !important;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    transform: translateX(-100%);
+    transition: transform var(--panel-ease);
+    /* NO incluir width en la transición para permitir redimensionamiento */
+    transition-property: transform !important;
     overflow: hidden;
-    z-index: 100;
-    display: flex;
+    z-index: 10000 !important; /* Z-index muy alto para estar sobre controles de Leaflet (que usan ~1000) */
+    display: flex !important;
     flex-direction: column;
+    visibility: visible !important;
+    opacity: 1 !important;
+    /* Permitir que el width se pueda modificar dinámicamente */
+    box-sizing: border-box;
 }
 
-.sidebar.collapsed {
-    width: 60px;
-    min-width: 60px;
+/* Panel abierto */
+.sidebar.is-open {
+    transform: translateX(0) !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    z-index: 10000 !important; /* Asegurar que esté por encima de todo */
 }
 
-.sidebar.collapsed .sidebar-content {
-    display: none;
+/* Asegurar que el panel esté por encima de controles de Leaflet */
+.sidebar,
+.sidebar.is-open {
+    z-index: 10000 !important;
 }
 
-.sidebar.collapsed .sidebar-title {
-    display: none;
+/* Asegurar que los controles de Leaflet no estén por encima del panel */
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-left,
+.leaflet-right,
+.leaflet-control,
+.leaflet-control-container,
+.leaflet-scale-line,
+.leaflet-control-zoom,
+.leaflet-control-layers {
+    z-index: 1000 !important; /* Menor que el panel */
+}
+
+/* Backdrop para el panel - DESHABILITADO (sin oscurecimiento) */
+#panelBackdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent; /* Sin fondo oscuro */
+    opacity: 0;
+    pointer-events: none; /* No interceptar clicks */
+    transition: opacity var(--panel-ease);
+    z-index: var(--z-backdrop);
+    display: none; /* Oculto completamente */
+}
+
+#panelBackdrop.is-visible {
+    opacity: 0; /* Mantener transparente */
+    pointer-events: none; /* No interceptar clicks */
+    display: none; /* Mantener oculto */
+}
+
+/* Botón toggle en la barra lateral izquierda */
+#togglePanelBtn.sidebar-toggle-btn {
+    position: fixed !important;
+    left: 0 !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    z-index: 10001 !important;
+    background: linear-gradient(135deg, var(--platzi-dark-blue) 0%, var(--platzi-light-blue) 100%) !important;
+    color: var(--platzi-white) !important;
+    border: none !important;
+    border-radius: 0 12px 12px 0 !important;
+    padding: 1rem 0.75rem !important;
+    font-size: 1.25rem !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15), 0 4px 16px rgba(0, 0, 0, 0.2) !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 48px !important;
+    height: 64px !important;
+    min-width: 48px !important;
+    min-height: 64px !important;
+}
+
+/* Cuando el panel está abierto, el botón se mueve con el panel */
+body:has(.sidebar.is-open) #togglePanelBtn.sidebar-toggle-btn,
+.sidebar.is-open ~ #togglePanelBtn.sidebar-toggle-btn {
+    left: min(95vw, 380px) !important;
+    transform: translateY(-50%) rotate(180deg) !important;
+}
+
+/* Hover y active states */
+#togglePanelBtn.sidebar-toggle-btn:hover {
+    background: linear-gradient(135deg, var(--platzi-light-blue) 0%, var(--platzi-dark-blue) 100%) !important;
+    box-shadow: 2px 0 16px rgba(0, 0, 0, 0.2), 0 6px 20px rgba(0, 0, 0, 0.3) !important;
+    transform: translateY(-50%) scale(1.05) !important;
+}
+
+.sidebar.is-open #togglePanelBtn.sidebar-toggle-btn:hover {
+    transform: translateY(-50%) rotate(180deg) scale(1.05) !important;
+}
+
+#togglePanelBtn.sidebar-toggle-btn:active {
+    transform: translateY(-50%) scale(0.95) !important;
+}
+
+.sidebar.is-open #togglePanelBtn.sidebar-toggle-btn:active {
+    transform: translateY(-50%) rotate(180deg) scale(0.95) !important;
+}
+
+#togglePanelBtn.sidebar-toggle-btn:focus {
+    outline: 3px solid var(--platzi-light-blue) !important;
+    outline-offset: 2px !important;
+}
+
+/* Animación del icono de engranaje */
+#togglePanelBtn.sidebar-toggle-btn i {
+    transition: transform 0.3s ease !important;
+}
+
+#togglePanelBtn.sidebar-toggle-btn:hover i {
+    transform: rotate(90deg) !important;
+}
+
+/* Estilos antiguos del botón removidos - ahora usa .sidebar-toggle-btn */
+
+/* Prevenir scroll del body cuando el panel está abierto */
+body.panel-open {
+    overflow: hidden;
+}
+
+/* Desactivar animaciones para usuarios que prefieren movimiento reducido */
+@media (prefers-reduced-motion: reduce) {
+    .sidebar,
+    #panelBackdrop {
+        transition: none !important;
+    }
+}
+
+/* Handle para redimensionar el panel */
+.sidebar-resize-handle {
+    position: absolute !important;
+    right: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 6px !important;
+    cursor: ew-resize !important;
+    z-index: 10001 !important;
+    background: rgba(45, 90, 160, 0.05) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: background 0.2s ease !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    border-left: 1px solid rgba(45, 90, 160, 0.3) !important;
+}
+
+.sidebar-resize-handle:hover {
+    background: rgba(45, 90, 160, 0.15) !important;
+    border-left-color: rgba(45, 90, 160, 0.4) !important;
+}
+
+.sidebar-resize-handle:active {
+    background: rgba(45, 90, 160, 0.25) !important;
+    border-left-color: rgba(45, 90, 160, 0.6) !important;
+}
+
+.sidebar-resize-handle i {
+    color: rgba(45, 90, 160, 0.6) !important;
+    font-size: 0.9rem !important;
+    pointer-events: none !important;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+.sidebar-resize-handle:hover i {
+    color: rgba(45, 90, 160, 0.9) !important;
+    transform: scale(1.1) !important;
 }
 
 .sidebar-header {
@@ -141,36 +319,7 @@ body {
     align-items: center;
 }
 
-.sidebar-toggle,
-.sidebar-resize {
-    background: rgba(255, 255, 255, 0.15);
-    border: none;
-    color: white;
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    font-size: 0.9rem;
-}
-
-.sidebar-toggle:hover,
-.sidebar-resize:hover {
-    background: rgba(255, 255, 255, 0.25);
-    transform: scale(1.1);
-}
-
-.sidebar-toggle:active,
-.sidebar-resize:active {
-    transform: scale(0.95);
-}
-
-.sidebar.collapsed .sidebar-toggle i {
-    transform: rotate(180deg);
-}
+/* Estilos de sidebar-toggle y sidebar-resize removidos - ahora se usa sidebar-close */
 
 .sidebar-content {
     flex: 1;
@@ -779,7 +928,7 @@ body {
 /* Contenedor Mapa y Constructores */
 .map-constructors-container {
     display: grid;
-    grid-template-columns: 2fr 1fr;
+    grid-template-columns: 3.5fr 1fr; /* Mapa más ancho, Top 10 más estrecho */
     gap: 1.5rem;
     margin-top: 0;
 }
@@ -1428,8 +1577,8 @@ body {
 .heatmap-legend {
     position: absolute;
     bottom: 10px;
-    left: 10px;
-    right: auto;
+    right: 10px; /* Movido de left a right */
+    left: auto;
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(10px);
     border-radius: 8px;
@@ -2355,13 +2504,13 @@ body {
 
 .constructor-item {
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 249, 250, 0.9) 100%);
-    border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 1rem;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08),
-                0 2px 4px rgba(0, 0, 0, 0.04);
-    border: 2px solid rgba(45, 90, 160, 0.1);
-    border-left: 4px solid var(--platzi-light-blue);
+    border-radius: 10px;
+    padding: 0.75rem; /* Reducido de 1.25rem */
+    margin-bottom: 0.6rem; /* Reducido de 1rem */
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06),
+                0 1px 2px rgba(0, 0, 0, 0.03);
+    border: 1.5px solid rgba(45, 90, 160, 0.1);
+    border-left: 3px solid var(--platzi-light-blue);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     animation: slideIn 0.5s ease-out;
     animation-fill-mode: both;
@@ -2439,23 +2588,23 @@ body {
 .constructor-header {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
+    gap: 0.5rem; /* Reducido de 0.75rem */
+    margin-bottom: 0.5rem; /* Reducido de 0.75rem */
 }
 
 .constructor-rank {
     background: var(--platzi-light-blue);
     color: white;
-    width: 32px;
-    height: 32px;
+    width: 26px; /* Reducido de 32px */
+    height: 26px; /* Reducido de 32px */
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 0.8rem; /* Reducido de 0.9rem */
     flex-shrink: 0;
-    box-shadow: 0 2px 6px rgba(45, 90, 160, 0.3);
+    box-shadow: 0 2px 4px rgba(45, 90, 160, 0.3);
 }
 
 .constructor-name {
@@ -2504,7 +2653,7 @@ body {
 }
 
 .constructor-stat-value {
-    font-size: 1.1rem;
+    font-size: 0.95rem; /* Reducido de 1.1rem */
     font-weight: 700;
     color: var(--platzi-dark-blue);
 }
@@ -2950,6 +3099,14 @@ tbody td.score-cell {
     font-weight: 600;
 }
 
+/* Asegurar que main-content no tenga márgenes que dependan del sidebar */
+.main-content {
+    flex: 1;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
     .main-container {
@@ -2957,9 +3114,7 @@ tbody td.score-cell {
     }
     
     .sidebar {
-        width: 100%;
-        position: relative;
-        top: 0;
+        width: min(95vw, var(--panel-width));
     }
     
     .classification-cards {

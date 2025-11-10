@@ -19,6 +19,14 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/sidebar-modern.css') }}">
 </head>
 <body>
+    <!-- Backdrop del panel -->
+    <div id="panelBackdrop" hidden aria-hidden="true"></div>
+    
+    <!-- Botón toggle flotante en la barra lateral izquierda - FUERA del panel para que siempre sea visible -->
+    <button id="togglePanelBtn" class="sidebar-toggle-btn" aria-controls="sidebar" aria-expanded="false" aria-label="Expandir/Ocultar Panel de Control" title="Expandir Panel">
+        <i class="fas fa-cog"></i>
+    </button>
+    
     <!-- Header -->
     <header class="main-header">
         <div class="container">
@@ -27,20 +35,15 @@
         </div>
     </header>
 
-    <!-- Contenedor principal -->
-    <div class="container main-container">
-        <!-- Sidebar de filtros y proyectos -->
-        <aside class="sidebar" id="sidebar">
+        <!-- Sidebar de filtros y proyectos (off-canvas) - Fuera del contenedor para evitar problemas de overflow -->
+        <aside class="sidebar" id="sidebar" role="dialog" aria-modal="true" aria-labelledby="sidebar-title" aria-hidden="true" tabindex="-1">
             <div class="sidebar-header">
-                <h2><i class="fas fa-sliders-h"></i> <span class="sidebar-title">Panel de Control</span></h2>
-                <div class="sidebar-controls">
-                    <button class="sidebar-toggle" id="sidebar-toggle" title="Colapsar/Expandir" aria-label="Colapsar sidebar">
-                        <i class="fas fa-chevron-left"></i>
-                    </button>
-                    <button class="sidebar-resize" id="sidebar-resize" title="Cambiar ancho" aria-label="Redimensionar sidebar">
-                        <i class="fas fa-arrows-alt-h"></i>
-                    </button>
-                </div>
+                <h2 id="sidebar-title"><i class="fas fa-sliders-h"></i> <span class="sidebar-title">Panel de Control</span></h2>
+            </div>
+            
+            <!-- Resize handle para redimensionar el panel -->
+            <div class="sidebar-resize-handle" id="sidebar-resize-handle" title="Arrastra para redimensionar el ancho del panel">
+                <i class="fas fa-grip-vertical"></i>
             </div>
             
             <div class="sidebar-content" id="sidebar-content">
@@ -366,7 +369,9 @@
             </div>
             </div> <!-- Cierre de sidebar-content -->
         </aside>
-
+    
+    <!-- Contenedor principal -->
+    <div class="container main-container">
         <!-- Contenido principal -->
         <main class="main-content">
             <!-- Mapa y Ranking de Constructores -->
@@ -675,6 +680,93 @@
     
     <!-- JavaScript personalizado -->
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    
+    <!-- Test directo del panel (fallback) -->
+    <script>
+        // Test directo después de que todo cargue
+        window.addEventListener('load', function() {
+            console.log('[TEST] Verificando elementos del panel...');
+            const panel = document.getElementById('sidebar');
+            const toggle = document.getElementById('togglePanelBtn');
+            const backdrop = document.getElementById('panelBackdrop');
+            
+            console.log('[TEST] Elementos encontrados:', {
+                panel: !!panel,
+                toggle: !!toggle,
+                backdrop: !!backdrop,
+                panelElement: panel,
+                toggleElement: toggle
+            });
+            
+            if (toggle && panel) {
+                // Agregar listener directo como último recurso con toggle completo
+                toggle.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('[TEST] Click detectado en toggle!');
+                    console.log('[TEST] Panel abierto actualmente:', panel.classList.contains('is-open'));
+                    
+                    const isOpen = panel.classList.contains('is-open');
+                    
+                    if (isOpen) {
+                        // CERRAR panel
+                        console.log('[TEST] Cerrando panel...');
+                        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+                        panel.style.cssText = `
+                            position: fixed !important;
+                            left: 0 !important;
+                            top: 0 !important;
+                            bottom: 0 !important;
+                            width: ${currentWidth}px !important;
+                            min-width: 280px !important;
+                            max-width: 90vw !important;
+                            height: 100vh !important;
+                            transform: translateX(-100%) !important;
+                            visibility: visible !important;
+                            opacity: 1 !important;
+                            display: flex !important;
+                            z-index: 10000 !important;
+                        `;
+                        panel.classList.remove('is-open');
+                        panel.setAttribute('aria-hidden', 'true');
+                        toggle.setAttribute('aria-expanded', 'false');
+                        toggle.setAttribute('title', 'Expandir Panel');
+                        document.body.classList.remove('panel-open');
+                        console.log('[TEST] Panel cerrado');
+                    } else {
+                        // ABRIR panel
+                        console.log('[TEST] Abriendo panel...');
+                        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+                        // Usar setProperty en lugar de cssText para permitir redimensionamiento
+                        panel.style.setProperty('position', 'fixed', 'important');
+                        panel.style.setProperty('left', '0', 'important');
+                        panel.style.setProperty('top', '0', 'important');
+                        panel.style.setProperty('bottom', '0', 'important');
+                        panel.style.setProperty('height', '100vh', 'important');
+                        panel.style.setProperty('transform', 'translateX(0)', 'important');
+                        panel.style.setProperty('visibility', 'visible', 'important');
+                        panel.style.setProperty('opacity', '1', 'important');
+                        panel.style.setProperty('display', 'flex', 'important');
+                        panel.style.setProperty('z-index', '10000', 'important');
+                        panel.style.setProperty('background', 'white', 'important');
+                        panel.style.setProperty('min-width', '280px', 'important');
+                        panel.style.setProperty('max-width', '90vw', 'important');
+                        panel.style.setProperty('width', currentWidth + 'px', 'important');
+                        panel.classList.add('is-open');
+                        panel.setAttribute('aria-hidden', 'false');
+                        toggle.setAttribute('aria-expanded', 'true');
+                        toggle.setAttribute('title', 'Ocultar Panel');
+                        document.body.classList.add('panel-open');
+                        console.log('[TEST] Panel abierto');
+                    }
+                });
+                
+                console.log('[TEST] Listener agregado al botón toggle (con toggle completo)');
+            } else {
+                console.error('[TEST] ERROR: No se encontraron elementos necesarios');
+            }
+        });
+    </script>
 </body>
 </html>
 

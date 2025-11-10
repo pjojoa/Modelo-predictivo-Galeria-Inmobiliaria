@@ -108,8 +108,8 @@ function setupToolbarToggle() {
 
 // Configurar sistema de pestañas
 function setupTabs() {
-    const tabButtons = document.querySelectorAll('.tab-button');
-    const tabContents = document.querySelectorAll('.tab-content');
+    const tabButtons = document.querySelectorAll('.sidebar-tab');
+    const tabContents = document.querySelectorAll('.tab-pane');
     
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
@@ -121,9 +121,531 @@ function setupTabs() {
             
             // Agregar clase active al botón y contenido seleccionado
             button.classList.add('active');
-            document.getElementById(`tab-${targetTab}`).classList.add('active');
+            const targetPane = document.getElementById(`tab-${targetTab}`);
+            if (targetPane) {
+                targetPane.classList.add('active');
+            }
         });
     });
+}
+
+// Configurar panel off-canvas con accesibilidad completa
+function setupSidebarControls() {
+    console.log('[setupSidebarControls] INICIANDO función...');
+    
+    const panel = document.getElementById('sidebar');
+    const toggle = document.getElementById('togglePanelBtn');
+    const backdrop = document.getElementById('panelBackdrop');
+    const resizeHandle = document.getElementById('sidebar-resize-handle');
+    const main = document.querySelector('.main-content') || document.body;
+    
+    console.log('[setupSidebarControls] Búsqueda de elementos:', {
+        panel: panel,
+        toggle: toggle,
+        backdrop: backdrop,
+        closeBtn: closeBtn,
+        panelExists: !!panel,
+        toggleExists: !!toggle,
+        backdropExists: !!backdrop
+    });
+    
+    if (!panel) {
+        console.error('[setupSidebarControls] ERROR CRÍTICO: No se encontró el panel #sidebar');
+        console.error('[setupSidebarControls] Intentando buscar de otra forma...');
+        const allAsides = document.querySelectorAll('aside');
+        console.log('[setupSidebarControls] Todos los elementos <aside> encontrados:', allAsides);
+        return;
+    }
+    
+    if (!toggle) {
+        console.error('[setupSidebarControls] ERROR CRÍTICO: No se encontró el botón #togglePanelBtn');
+        return;
+    }
+    
+    if (!backdrop) {
+        console.error('[setupSidebarControls] ERROR: No se encontró el backdrop #panelBackdrop');
+        // Continuar de todas formas
+    }
+    
+    console.log('[setupSidebarControls] Todos los elementos encontrados, inicializando panel off-canvas');
+    
+    let lastFocused = null;
+    
+    function openPanel() {
+        console.log('[setupSidebarControls] Abriendo panel');
+        if (panel.classList.contains('is-open')) {
+            console.log('[setupSidebarControls] Panel ya está abierto');
+            return;
+        }
+        
+        lastFocused = document.activeElement;
+        
+        // FORZAR visibilidad con estilos inline (máxima prioridad)
+        // NO usar cssText completo para permitir que el width se pueda modificar después
+        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+        
+        // Aplicar estilos uno por uno, EXCEPTO width que se manejará por separado
+        panel.style.setProperty('position', 'fixed', 'important');
+        panel.style.setProperty('left', '0', 'important');
+        panel.style.setProperty('top', '0', 'important');
+        panel.style.setProperty('bottom', '0', 'important');
+        panel.style.setProperty('height', '100vh', 'important');
+        panel.style.setProperty('transform', 'translateX(0)', 'important');
+        panel.style.setProperty('visibility', 'visible', 'important');
+        panel.style.setProperty('opacity', '1', 'important');
+        panel.style.setProperty('display', 'flex', 'important');
+        panel.style.setProperty('z-index', '10000', 'important');
+        panel.style.setProperty('overflow', 'hidden', 'important');
+        panel.style.setProperty('min-width', '280px', 'important');
+        panel.style.setProperty('max-width', '90vw', 'important');
+        
+        // Width se aplica por separado para que pueda ser modificado
+        panel.style.setProperty('width', currentWidth + 'px', 'important');
+        
+        panel.classList.add('is-open');
+        panel.setAttribute('aria-hidden', 'false');
+        panel.removeAttribute('hidden');
+        
+        // Backdrop deshabilitado - no oscurecer el fondo
+        backdrop.hidden = true;
+        backdrop.setAttribute('aria-hidden', 'true');
+        backdrop.style.cssText = `
+            display: none !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        `;
+        backdrop.classList.remove('is-visible');
+        
+        toggle.setAttribute('aria-expanded', 'true');
+        toggle.setAttribute('title', 'Ocultar Panel');
+        // Mover botón cuando el panel se abre (usar el ancho actual del panel)
+        const panelWidth = panel.offsetWidth || parseInt(getComputedStyle(panel).width) || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+        toggle.style.left = panelWidth + 'px';
+        toggle.style.transform = 'translateY(-50%) rotate(180deg)';
+        
+        // Asegurar que el handle de redimensionamiento sea visible y funcional
+        const resizeHandle = document.getElementById('sidebar-resize-handle');
+        if (resizeHandle) {
+            resizeHandle.style.cssText = `
+                position: absolute !important;
+                right: 0 !important;
+                top: 0 !important;
+                bottom: 0 !important;
+                width: 6px !important;
+                cursor: ew-resize !important;
+                z-index: 10001 !important;
+                background: rgba(45, 90, 160, 0.05) !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                pointer-events: auto !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                border-left: 1px solid rgba(45, 90, 160, 0.3) !important;
+            `;
+            
+            // Asegurar que el icono sea visible
+            const handleIcon = resizeHandle.querySelector('i');
+            if (handleIcon) {
+                handleIcon.style.cssText = `
+                    color: rgba(45, 90, 160, 0.6) !important;
+                    font-size: 0.9rem !important;
+                    display: block !important;
+                    visibility: visible !important;
+                    opacity: 1 !important;
+                `;
+            }
+            
+            console.log('[Resize] Handle visible cuando el panel se abre:', {
+                handle: resizeHandle,
+                icon: handleIcon,
+                handleDisplay: window.getComputedStyle(resizeHandle).display,
+                iconDisplay: handleIcon ? window.getComputedStyle(handleIcon).display : 'no icon'
+            });
+        }
+        
+        document.body.classList.add('panel-open');
+        
+        // Aplicar inert al contenido principal si está disponible
+        try {
+            if (main.setAttribute) {
+                main.setAttribute('inert', '');
+            }
+        } catch (_) {
+            // Fallback: usar aria-hidden
+            const mainContent = document.querySelector('.main-content');
+            if (mainContent) {
+                mainContent.setAttribute('aria-hidden', 'true');
+            }
+        }
+        
+        // Enfoque inicial en el primer elemento enfocable del panel
+        setTimeout(() => {
+            const focusable = panel.querySelector('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+            if (focusable) {
+                focusable.focus();
+            } else {
+                panel.focus();
+            }
+        }, 100);
+        
+        console.log('[setupSidebarControls] Panel abierto - estilos aplicados:', {
+            transform: window.getComputedStyle(panel).transform,
+            visibility: window.getComputedStyle(panel).visibility,
+            opacity: window.getComputedStyle(panel).opacity,
+            zIndex: window.getComputedStyle(panel).zIndex
+        });
+    }
+    
+    function closePanel() {
+        console.log('[setupSidebarControls] Cerrando panel');
+        if (!panel.classList.contains('is-open')) {
+            console.log('[setupSidebarControls] Panel ya está cerrado');
+            return;
+        }
+        
+        // FORZAR cierre con estilos inline (máxima prioridad)
+        // Mantener el ancho actual al cerrar (no resetear)
+        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+        
+        // Usar setProperty en lugar de cssText para permitir redimensionamiento futuro
+        panel.style.setProperty('position', 'fixed', 'important');
+        panel.style.setProperty('left', '0', 'important');
+        panel.style.setProperty('top', '0', 'important');
+        panel.style.setProperty('bottom', '0', 'important');
+        panel.style.setProperty('height', '100vh', 'important');
+        panel.style.setProperty('transform', 'translateX(-100%)', 'important');
+        panel.style.setProperty('visibility', 'visible', 'important');
+        panel.style.setProperty('opacity', '1', 'important');
+        panel.style.setProperty('display', 'flex', 'important');
+        panel.style.setProperty('z-index', '10000', 'important');
+        panel.style.setProperty('overflow', 'hidden', 'important');
+        panel.style.setProperty('min-width', '280px', 'important');
+        panel.style.setProperty('max-width', '90vw', 'important');
+        panel.style.setProperty('width', currentWidth + 'px', 'important');
+        
+        panel.classList.remove('is-open');
+        panel.setAttribute('aria-hidden', 'true');
+        
+        // Backdrop completamente deshabilitado
+        if (backdrop) {
+            backdrop.hidden = true;
+            backdrop.setAttribute('aria-hidden', 'true');
+            backdrop.style.cssText = `
+                display: none !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+            `;
+            backdrop.classList.remove('is-visible');
+        }
+        
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.setAttribute('title', 'Expandir Panel');
+        // Mover botón de vuelta cuando el panel se cierra
+        toggle.style.left = '0';
+        toggle.style.transform = 'translateY(-50%)';
+        document.body.classList.remove('panel-open');
+        
+        // Remover inert
+        try {
+            if (main.removeAttribute) {
+                main.removeAttribute('inert');
+            }
+        } catch (_) {
+            const mainContent = document.querySelector('.main-content');
+            if (mainContent) {
+                mainContent.removeAttribute('aria-hidden');
+            }
+        }
+        
+        // Devolver foco al elemento que abrió el panel
+        if (lastFocused && typeof lastFocused.focus === 'function') {
+            lastFocused.focus();
+        } else {
+            toggle.focus();
+        }
+        
+        console.log('[setupSidebarControls] Panel cerrado - estilos aplicados:', {
+            transform: window.getComputedStyle(panel).transform,
+            visibility: window.getComputedStyle(panel).visibility
+        });
+    }
+    
+    // Toggle del panel
+    toggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[setupSidebarControls] Click en toggle, panel abierto:', panel.classList.contains('is-open'));
+        console.log('[setupSidebarControls] Estado del panel antes:', {
+            hasIsOpen: panel.classList.contains('is-open'),
+            transform: window.getComputedStyle(panel).transform,
+            visibility: window.getComputedStyle(panel).visibility,
+            display: window.getComputedStyle(panel).display
+        });
+        if (panel.classList.contains('is-open')) {
+            closePanel();
+        } else {
+            openPanel();
+        }
+    });
+    
+    // También agregar listener directo como fallback
+    toggle.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[setupSidebarControls] onClick directo activado');
+        if (panel.classList.contains('is-open')) {
+            closePanel();
+        } else {
+            openPanel();
+        }
+    };
+    
+    // Debug: verificar que los elementos existen
+    console.log('[setupSidebarControls] Elementos encontrados:', {
+        panel: panel,
+        toggle: toggle,
+        backdrop: backdrop,
+        resizeHandle: resizeHandle,
+        panelExists: !!panel,
+        toggleExists: !!toggle,
+        backdropExists: !!backdrop,
+        resizeHandleExists: !!resizeHandle
+    });
+    
+    // Test directo: verificar que el botón es clickeable
+    console.log('[setupSidebarControls] Test de click directo en 2 segundos...');
+    setTimeout(() => {
+        console.log('[setupSidebarControls] Verificando estado inicial del panel:', {
+            transform: window.getComputedStyle(panel).transform,
+            visibility: window.getComputedStyle(panel).visibility,
+            display: window.getComputedStyle(panel).display,
+            zIndex: window.getComputedStyle(panel).zIndex,
+            position: window.getComputedStyle(panel).position
+        });
+    }, 2000);
+    
+    // Funcionalidad de redimensionamiento - MEJORADA
+    if (resizeHandle) {
+        console.log('[Resize] Inicializando funcionalidad de redimensionamiento...');
+        
+        let isResizing = false;
+        let startX = 0;
+        let startWidth = 0;
+        
+        // Asegurar que el handle sea visible y funcional
+        resizeHandle.style.cssText = `
+            position: absolute !important;
+            right: 0 !important;
+            top: 0 !important;
+            bottom: 0 !important;
+            width: 6px !important;
+            cursor: ew-resize !important;
+            z-index: 10001 !important;
+            background: rgba(45, 90, 160, 0.05) !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            pointer-events: auto !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            border-left: 1px solid rgba(45, 90, 160, 0.3) !important;
+        `;
+        
+        // Asegurar que el icono sea visible
+        const handleIcon = resizeHandle.querySelector('i');
+        if (handleIcon) {
+            handleIcon.style.cssText = `
+                color: rgba(45, 90, 160, 0.6) !important;
+                font-size: 0.9rem !important;
+                display: block !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+            `;
+        }
+        
+        resizeHandle.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[Resize] Mouse down en handle');
+            
+            if (!panel.classList.contains('is-open')) {
+                console.log('[Resize] Panel no está abierto, no se puede redimensionar');
+                return;
+            }
+            
+            isResizing = true;
+            startX = e.clientX;
+            // Obtener ancho actual de múltiples formas
+            const computedWidth = parseInt(getComputedStyle(panel).width);
+            const offsetWidth = panel.offsetWidth;
+            startWidth = offsetWidth || computedWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+            
+            console.log('[Resize] Iniciando redimensionamiento:', {
+                startX: startX,
+                startWidth: startWidth,
+                computedWidth: computedWidth,
+                offsetWidth: offsetWidth,
+                styleWidth: panel.style.width
+            });
+            
+            // DESHABILITAR transiciones durante el redimensionamiento
+            panel.style.transition = 'none !important';
+            panel.style.setProperty('transition', 'none', 'important');
+            
+            // Agregar listeners globales
+            document.addEventListener('mousemove', handleResize, { passive: false });
+            document.addEventListener('mouseup', stopResize);
+            
+            // Cambiar cursor
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+            resizeHandle.style.cursor = 'ew-resize';
+        });
+        
+        function handleResize(e) {
+            if (!isResizing) return;
+            
+            e.preventDefault(); // Prevenir scroll horizontal
+            e.stopPropagation(); // Prevenir propagación
+            
+            const diff = e.clientX - startX;
+            const newWidth = Math.max(280, Math.min(window.innerWidth * 0.9, startWidth + diff));
+            
+            // FORZAR actualización del ancho - método directo sin transiciones
+            // Asegurar que no haya transiciones que interfieran
+            panel.style.transition = 'none';
+            panel.style.setProperty('transition', 'none', 'important');
+            
+            // Aplicar el nuevo ancho de múltiples formas para asegurar que funcione
+            panel.style.width = newWidth + 'px';
+            panel.style.setProperty('width', newWidth + 'px', 'important');
+            
+            // Forzar reflow inmediato
+            const forceReflow = panel.offsetWidth;
+            
+            // Verificar que se aplicó
+            const appliedWidth = panel.offsetWidth;
+            
+            // Si aún no coincide, usar método más agresivo
+            if (Math.abs(newWidth - appliedWidth) > 1) {
+                // Remover todos los estilos de width primero
+                const currentStyle = panel.getAttribute('style') || '';
+                // Remover width de cualquier forma
+                let cleanStyle = currentStyle
+                    .replace(/width\s*:\s*[^;!]+(!important)?/gi, '')
+                    .replace(/width\s*:\s*[^;]+/gi, '')
+                    .replace(/;\s*;/g, ';')
+                    .trim();
+                
+                // Agregar el nuevo width al final
+                if (cleanStyle && !cleanStyle.endsWith(';')) {
+                    cleanStyle += ';';
+                }
+                cleanStyle += ' width: ' + newWidth + 'px !important;';
+                
+                panel.setAttribute('style', cleanStyle);
+                
+                // Forzar reflow de nuevo
+                const forceReflow2 = panel.offsetWidth;
+            }
+            
+            // Actualizar posición del botón toggle si el panel está abierto
+            if (panel.classList.contains('is-open') && toggle) {
+                toggle.style.left = newWidth + 'px';
+            }
+            
+            // Guardar ancho en localStorage
+            localStorage.setItem('sidebarWidth', newWidth.toString());
+            
+            console.log('[Resize] Ancho actualizado:', {
+                intentado: newWidth,
+                aplicado: panel.offsetWidth,
+                diff: Math.abs(newWidth - panel.offsetWidth)
+            });
+        }
+        
+        function stopResize(e) {
+            if (!isResizing) return;
+            
+            console.log('[Resize] Deteniendo redimensionamiento');
+            isResizing = false;
+            
+            // REHABILITAR transiciones después del redimensionamiento
+            panel.style.transition = '';
+            panel.style.removeProperty('transition');
+            
+            // Remover listeners
+            document.removeEventListener('mousemove', handleResize);
+            document.removeEventListener('mouseup', stopResize);
+            
+            // Restaurar cursor
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            console.log('[Resize] Ancho final guardado:', panel.offsetWidth);
+        }
+        
+        // Cargar ancho guardado al iniciar
+        const savedWidth = localStorage.getItem('sidebarWidth');
+        if (savedWidth) {
+            const width = parseInt(savedWidth);
+            if (width >= 280 && width <= window.innerWidth * 0.9) {
+                panel.style.setProperty('width', width + 'px', 'important');
+                console.log('[Resize] Ancho cargado desde localStorage:', width);
+            }
+        }
+        
+        console.log('[Resize] Handle configurado correctamente:', {
+            handle: resizeHandle,
+            handleVisible: window.getComputedStyle(resizeHandle).display !== 'none',
+            handleZIndex: window.getComputedStyle(resizeHandle).zIndex,
+            panelWidth: panel.offsetWidth
+        });
+    } else {
+        console.error('[Resize] ERROR: No se encontró el handle de redimensionamiento');
+    }
+    
+    // Cerrar con backdrop
+    backdrop.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closePanel();
+    });
+    
+    // Cerrar con Esc
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && panel.classList.contains('is-open')) {
+            e.preventDefault();
+            e.stopPropagation();
+            closePanel();
+        }
+    });
+    
+    // Trap de foco dentro del panel
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Tab' || !panel.classList.contains('is-open')) return;
+        
+        const focusableNodes = panel.querySelectorAll('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        if (!focusableNodes.length) return;
+        
+        const first = focusableNodes[0];
+        const last = focusableNodes[focusableNodes.length - 1];
+        const active = document.activeElement;
+        
+        if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+        }
+    });
+    
+    // Inicializar estado: panel cerrado
+    panel.setAttribute('aria-hidden', 'true');
+    backdrop.hidden = true;
+    backdrop.setAttribute('aria-hidden', 'true');
 }
 
 // Cargar ranking de constructores
