@@ -513,16 +513,10 @@ function mostrarCaracteristicasExitosos(caracteristicas) {
     }
     
     // Debug: Log de estructura de amenidades
-    console.log('Características recibidas:', caracteristicas);
     if (caracteristicas.amenidades) {
-        console.log('Amenidades encontradas:', caracteristicas.amenidades);
-        console.log('Tipo:', typeof caracteristicas.amenidades);
-        console.log('Claves:', Object.keys(caracteristicas.amenidades));
         if (caracteristicas.amenidades.amenidades_exitosos) {
-            console.log('amenidades_exitosos encontrado:', Object.keys(caracteristicas.amenidades.amenidades_exitosos).length, 'amenidades');
         }
     } else {
-        console.log('No se encontraron amenidades en características');
     }
     
     let html = '<div class="characteristics-grid">';
@@ -879,23 +873,17 @@ async function loadProyectos() {
             tableSort.column = null;
             tableSort.direction = 'asc';
             
-            console.log(`Proyectos cargados: ${proyectosData.length}`);
+            
             
             // DEBUG: Verificar que año y tipo_vis estén presentes
             if (proyectosData.length > 0) {
-                const sample = proyectosData[0];
-                console.log('[DEBUG] Muestra de proyecto:', {
-                    nombre: sample.nombre,
-                    año: sample.año,
-                    tipo_vis: sample.tipo_vis,
-                    estrato: sample.estrato,
-                    vende: sample.vende
-                });
-                // Contar proyectos con año
                 const conAño = proyectosData.filter(p => p.año !== null && p.año !== undefined && p.año !== '').length;
                 const conTipoVis = proyectosData.filter(p => p.tipo_vis && p.tipo_vis !== 'N/A').length;
-                console.log(`[DEBUG] Proyectos con año: ${conAño}/${proyectosData.length}`);
-                console.log(`[DEBUG] Proyectos con tipo_vis: ${conTipoVis}/${proyectosData.length}`);
+                console.debug('[loadProyectos] Resumen de datos cargados', {
+                    total: proyectosData.length,
+                    conAño,
+                    conTipoVis
+                });
             }
             
             // Actualizar todas las vistas
@@ -922,7 +910,7 @@ async function loadProyectos() {
                 const diagResponse = await fetch('/api/diagnostico');
                 if (diagResponse.ok) {
                     const diagData = await diagResponse.json();
-                    console.log('Diagnóstico:', diagData);
+                    
                     
                     // Mostrar información de diagnóstico en la tabla
                     let mensajeDiagnostico = `<div style="text-align: left; padding: 1rem;">
@@ -986,10 +974,7 @@ async function loadProyectos() {
 
 // Actualizar mapa (optimizado) - con aislamiento de categorías seleccionadas
 function updateMap() {
-    console.log('[updateMap] Iniciando actualización del mapa');
-    console.log('[updateMap] markersEnabled:', markersEnabled);
-    console.log('[updateMap] proyectosData.length:', proyectosData.length);
-    console.log('[updateMap] proyectosDataOriginal.length:', proyectosDataOriginal.length);
+    
     
     // Limpiar marcadores existentes
     if (clustersEnabled && markerCluster) {
@@ -1004,8 +989,7 @@ function updateMap() {
     // Usar los datos filtrados (proyectosData ya contiene los datos filtrados si hay selección)
     const dataToShow = proyectosData;
 
-    console.log('[updateMap] dataToShow.length:', dataToShow.length);
-    console.log('[updateMap] selectedCategories.size:', selectedCategories.size);
+    
 
     if (dataToShow.length === 0) {
         console.warn('[updateMap] No hay datos para mostrar');
@@ -1048,7 +1032,7 @@ function updateMap() {
         return inRange;
     });
     
-    console.log('[updateMap] Proyectos con coordenadas válidas:', validProjects.length);
+    
     
     if (validProjects.length === 0) {
         console.warn('[updateMap] No hay proyectos con coordenadas válidas');
@@ -1146,9 +1130,7 @@ function updateMap() {
 
     markers = markerLayers;
 
-    console.log('[updateMap] Marcadores válidos creados:', markerLayers.length);
-    console.log('[updateMap] markersEnabled:', markersEnabled);
-    console.log('[updateMap] clustersEnabled:', clustersEnabled);
+    
 
     // IMPORTANTE: Siempre agregar marcadores si están habilitados
     // Si markersEnabled es false, forzar a true para mostrar marcadores
@@ -1168,12 +1150,12 @@ function updateMap() {
             markerCluster.clearLayers();
             if (markerLayers.length > 0) {
                 markerCluster.addLayers(markerLayers);
-                console.log('[updateMap] Marcadores agregados al cluster:', markerLayers.length);
+                
             }
             // Asegurarse de que el cluster esté en el mapa
             if (!map.hasLayer(markerCluster)) {
                 map.addLayer(markerCluster);
-                console.log('[updateMap] Cluster agregado al mapa');
+                
             }
         } else {
             // Agregar marcadores individuales
@@ -1184,7 +1166,7 @@ function updateMap() {
                     addedCount++;
                 }
             });
-            console.log('[updateMap] Marcadores individuales agregados al mapa:', addedCount);
+            
         }
     }
 
@@ -1311,34 +1293,6 @@ function getMarkerColor(proyecto) {
                 
             case 'vende':
                 color = generateColorFromString(String(proyecto.vende || 'N/A'));
-                break;
-                
-            case 'año':
-                // Formatear año: si es 2000-2099, mostrar solo los últimos 2 dígitos para consistencia
-                let año_str = 'N/A';
-                // Verificar si existe y no es null/undefined/0
-                if (proyecto.año !== null && proyecto.año !== undefined && proyecto.año !== '' && proyecto.año !== 0) {
-                    const año_num = parseInt(proyecto.año);
-                    if (!isNaN(año_num) && año_num > 0) {
-                        if (año_num >= 2000 && año_num < 2100) {
-                            // Mostrar solo los últimos 2 dígitos (00-99)
-                            año_str = String(año_num % 100).padStart(2, '0');
-                        } else if (año_num >= 1900 && año_num < 2000) {
-                            // Años del siglo pasado, mostrar completo
-                            año_str = String(año_num);
-                        } else if (año_num < 100) {
-                            // Si es menor a 100, asumir que son los últimos 2 dígitos desde 2000
-                            año_str = String(año_num).padStart(2, '0');
-                        } else {
-                            año_str = String(año_num);
-                        }
-                    } else {
-                        console.warn(`[getMarkerColor] Año inválido para proyecto ${proyecto.id}: ${proyecto.año} -> ${año_num}`);
-                    }
-                } else {
-                    console.warn(`[getMarkerColor] Proyecto ${proyecto.id} sin año:`, proyecto.año);
-                }
-                color = generateColorFromString(año_str);
                 break;
                 
             case 'zona':
@@ -2212,7 +2166,7 @@ function hideLoading() {
 
 // Configurar controles del mapa
 function setupMapControls() {
-    console.log('[setupMapControls] Iniciando configuración de controles del mapa...');
+    
     
     const styleSelect = document.getElementById('map-style-select');
     const centerBtn = document.getElementById('center-data-btn');
@@ -2221,14 +2175,7 @@ function setupMapControls() {
     const markersToggle = document.getElementById('markers-toggle');
     const markerColorSelect = document.getElementById('marker-color-select');
     
-    console.log('[setupMapControls] Elementos encontrados:', {
-        styleSelect: !!styleSelect,
-        centerBtn: !!centerBtn,
-        clusterToggle: !!clusterToggle,
-        heatmapToggle: !!heatmapToggle,
-        markersToggle: !!markersToggle,
-        markerColorSelect: !!markerColorSelect
-    });
+    
     
     if (!styleSelect || !centerBtn || !clusterToggle || !heatmapToggle || !markersToggle) {
         console.error('[setupMapControls] ERROR: No se encontraron todos los controles del mapa. Elementos faltantes:', {
@@ -2248,7 +2195,11 @@ function setupMapControls() {
     // Por defecto, los marcadores deben estar visibles (true)
     const savedMarkers = localStorage.getItem('mapMarkers');
     const savedMarkersEnabled = savedMarkers === null ? true : savedMarkers !== 'false';
-    const savedColorCriterion = localStorage.getItem('markerColorCriterion') || 'clasificacion';
+    const allowedColorCriteria = ['clasificacion', 'vende', 'zona', 'barrio', 'estrato', 'tipo_vis'];
+    let savedColorCriterion = localStorage.getItem('markerColorCriterion') || 'clasificacion';
+    if (!allowedColorCriteria.includes(savedColorCriterion)) {
+        savedColorCriterion = 'clasificacion';
+    }
     
     styleSelect.value = savedStyle;
     clusterToggle.checked = savedClusters;
@@ -2536,7 +2487,7 @@ function createHeatmap() {
     removeHeatmap();
     
     if (!proyectosData || proyectosData.length === 0) {
-        console.log('No hay datos de proyectos para crear heatmap');
+        
         return;
     }
     
@@ -2554,7 +2505,7 @@ function createHeatmap() {
         return;
     }
     
-    console.log(`Creando heatmap GIS con ${validProjects.length} proyectos válidos`);
+    
     
     // Usar normalizador robusto estilo GIS
     const normalize = weightNormalizer(validProjects, p => p.precio_promedio);
@@ -2564,7 +2515,7 @@ function createHeatmap() {
     const p5 = percentile(prices, 0.05);
     const p95 = percentile(prices, 0.95);
     
-    console.log(`Rango de precios (P5-P95): ${p5.toLocaleString('es-CO')} - ${p95.toLocaleString('es-CO')} COP`);
+    
     
     // Crear datos normalizados con intensidad mejorada
     const normalizedData = validProjects.map(p => {
@@ -2574,14 +2525,12 @@ function createHeatmap() {
         return [p.lat, p.lon, intensity];
     });
     
-    console.log(`Datos normalizados: ${normalizedData.length} puntos`);
-    console.log(`Intensidad promedio: ${(normalizedData.reduce((sum, d) => sum + d[2], 0) / normalizedData.length).toFixed(3)}`);
+    
     
     // Verificar si leaflet.heat está disponible
     if (typeof L.heatLayer !== 'function' && typeof L.heat !== 'function') {
         console.error('leaflet.heat no está disponible. Verificando carga de biblioteca...');
-        console.log('L.heatLayer:', typeof L.heatLayer);
-        console.log('L.heat:', typeof L.heat);
+            
         return;
     }
     
@@ -2611,7 +2560,7 @@ function createHeatmap() {
         });
         
         heatmapLayer.addTo(map);
-        console.log(`Heatmap GIS agregado: radius=${radius}, blur=${blur}`);
+        
         
         // Actualizar leyenda
         updateHeatmapLegend(p5, p95);
@@ -2758,7 +2707,7 @@ function loadMapStateFromURL() {
     const markerColor = params.get('markerColor');
     if (markerColor) {
         const markerColorSelect = document.getElementById('marker-color-select');
-        if (markerColorSelect && ['clasificacion', 'vende', 'año', 'zona', 'barrio'].includes(markerColor)) {
+        if (markerColorSelect && ['clasificacion', 'vende', 'zona', 'barrio'].includes(markerColor)) {
             markerColorSelect.value = markerColor;
             markerColorCriterion = markerColor;
         }
@@ -2807,28 +2756,6 @@ function updateMarkerLegend() {
                 
             case 'vende':
                 categoria = String(proyecto.vende || 'N/A').trim();
-                color = generateColorFromString(categoria);
-                break;
-                
-            case 'año':
-                if (proyecto.año !== null && proyecto.año !== undefined && proyecto.año !== '') {
-                    const año_num = parseInt(proyecto.año);
-                    if (!isNaN(año_num) && año_num > 0) {
-                        if (año_num >= 2000 && año_num < 2100) {
-                            categoria = String(año_num % 100).padStart(2, '0');
-                        } else if (año_num >= 1900 && año_num < 2000) {
-                            categoria = String(año_num);
-                        } else if (año_num < 100) {
-                            categoria = String(año_num).padStart(2, '0');
-                        } else {
-                            categoria = String(año_num);
-                        }
-                    } else {
-                        categoria = 'N/A';
-                    }
-                } else {
-                    categoria = 'N/A';
-                }
                 color = generateColorFromString(categoria);
                 break;
                 
@@ -2891,14 +2818,12 @@ function updateMarkerLegend() {
     const titulos = {
         'clasificacion': 'Filtrar Clasificación',
         'vende': 'Filtrar Vendedor',
-        'año': 'Filtrar Año',
         'zona': 'Filtrar Zona',
         'barrio': 'Filtrar Barrio'
     };
     const subtitulos = {
         'clasificacion': 'Selecciona las clasificaciones a mostrar',
         'vende': 'Selecciona los vendedores a mostrar',
-        'año': 'Selecciona los años a mostrar',
         'zona': 'Selecciona las zonas a mostrar',
         'barrio': 'Selecciona los barrios a mostrar'
     };
@@ -3005,13 +2930,12 @@ function updateCategoryStatsPanel() {
     // IMPORTANTE: Siempre mostrar TODAS las categorías, sin importar la selección
     if (!allCategories.length) return;
     
-    console.log('[updateCategoryStatsPanel] Total categorías a mostrar:', allCategories.length);
+    
     
     // Actualizar título de la sección
     const titulos = {
         'clasificacion': 'Clasificación',
         'vende': 'Vendedor',
-        'año': 'Año',
         'zona': 'Zona',
         'barrio': 'Barrio',
         'estrato': 'Estrato',
@@ -3040,26 +2964,6 @@ function updateCategoryStatsPanel() {
                         break;
                     case 'vende':
                         categoria = String(proyecto.vende || 'N/A').trim();
-                        break;
-                    case 'año':
-                        if (proyecto.año !== null && proyecto.año !== undefined && proyecto.año !== '' && proyecto.año !== 0) {
-                            const año_num = parseInt(proyecto.año);
-                            if (!isNaN(año_num) && año_num > 0) {
-                                if (año_num >= 2000 && año_num < 2100) {
-                                    categoria = String(año_num % 100).padStart(2, '0');
-                                } else if (año_num >= 1900 && año_num < 2000) {
-                                    categoria = String(año_num);
-                                } else if (año_num < 100) {
-                                    categoria = String(año_num).padStart(2, '0');
-                                } else {
-                                    categoria = String(año_num);
-                                }
-                            } else {
-                                categoria = 'N/A';
-                            }
-                        } else {
-                            categoria = 'N/A';
-                        }
                         break;
                     case 'zona':
                         categoria = String(proyecto.zona || 'N/A').trim();
@@ -3143,7 +3047,7 @@ function updateCategoryStatsPanel() {
         if (filteredCategories.length === 0) {
             statsHtml = '<tr><td colspan="6" class="no-results"><div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div></td></tr>';
         } else {
-            console.log('[updateCategoryStatsPanel] Renderizando', filteredCategories.length, 'categorías');
+            
             // Determinar si hay alguna selección para aplicar transparencia
             const hasSelection = selectedCategories.size > 0;
             
@@ -3334,26 +3238,6 @@ function filterBySelectedCategories() {
                 break;
             case 'vende':
                 categoria = String(proyecto.vende || 'N/A').trim();
-                break;
-            case 'año':
-                if (proyecto.año !== null && proyecto.año !== undefined && proyecto.año !== '') {
-                    const año_num = parseInt(proyecto.año);
-                    if (!isNaN(año_num) && año_num > 0) {
-                        if (año_num >= 2000 && año_num < 2100) {
-                            categoria = String(año_num % 100).padStart(2, '0');
-                        } else if (año_num >= 1900 && año_num < 2000) {
-                            categoria = String(año_num);
-                        } else if (año_num < 100) {
-                            categoria = String(año_num).padStart(2, '0');
-                        } else {
-                            categoria = String(año_num);
-                        }
-                    } else {
-                        categoria = 'N/A';
-                    }
-                } else {
-                    categoria = 'N/A';
-                }
                 break;
             case 'zona':
                 categoria = String(proyecto.zona || 'N/A').trim();

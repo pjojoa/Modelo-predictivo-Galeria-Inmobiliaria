@@ -36,7 +36,6 @@ async function findNearestImage(lat, lng, radius = 100) {
             url.searchParams.set('radius', radius.toString());
         }
         
-        console.log(`[street] Buscando imagen cerca de (${lat}, ${lng})...`);
         const response = await fetch(url.toString());
         
         if (!response.ok) {
@@ -49,11 +48,9 @@ async function findNearestImage(lat, lng, radius = 100) {
         
         if (json?.data && json.data.length > 0) {
             const imageId = json.data[0].id;
-            console.log(`[street] Imagen encontrada: ${imageId} cerca de (${lat}, ${lng})`);
             return imageId;
         }
         
-        console.log(`[street] No se encontró imagen cerca de (${lat}, ${lng})`);
         return null;
         
     } catch (error) {
@@ -72,7 +69,6 @@ async function loadMapillaryJS() {
     }
     
     try {
-        console.log('[street] Cargando MapillaryJS...');
         
         // Cargar CSS
         if (!document.getElementById('mapillary-css')) {
@@ -81,7 +77,6 @@ async function loadMapillaryJS() {
             link.rel = 'stylesheet';
             link.href = 'https://unpkg.com/mapillary-js@4.1.3/dist/mapillary.css';
             document.head.appendChild(link);
-            console.log('[street] CSS de Mapillary cargado');
         }
         
         // Cargar JS de forma dinámica
@@ -91,7 +86,6 @@ async function loadMapillaryJS() {
         window.Mapillary = mapillaryModule;
         mapillaryLoaded = true;
         
-        console.log('[street] MapillaryJS cargado exitosamente', mapillaryModule);
         return mapillaryModule;
         
     } catch (error) {
@@ -136,8 +130,6 @@ async function openMapillaryViewer(imageId, containerId = 'mly') {
         container.style.height = '400px';
         container.style.width = '100%';
         
-        console.log(`[street] Creando viewer con imagen: ${imageId}, token: ${token.substring(0, 10)}...`);
-        
         // Crear nuevo viewer
         mapillaryViewer = new Mapillary.Viewer({
             container: containerId,
@@ -145,7 +137,6 @@ async function openMapillaryViewer(imageId, containerId = 'mly') {
             imageId: imageId
         });
         
-        console.log(`[street] Viewer creado exitosamente`);
         
     } catch (error) {
         console.error('[street] Error al abrir viewer:', error);
@@ -165,7 +156,6 @@ async function moveToImage(imageId) {
     
     try {
         await mapillaryViewer.moveTo(imageId);
-        console.log(`[street] Viewer movido a imagen: ${imageId}`);
     } catch (error) {
         console.error('[street] Error al mover viewer:', error);
         // Si falla, recrear el viewer
@@ -192,7 +182,6 @@ function closeMapillaryViewer() {
  * @param {Object} proyecto - Objeto con lat, lng y otros datos del proyecto
  */
 async function openStreetPreview(proyecto) {
-    console.log('[street] openStreetPreview llamado con proyecto:', proyecto);
     
     const previewPanel = document.getElementById('street-preview-panel');
     const mlyDiv = document.getElementById('mly');
@@ -214,7 +203,6 @@ async function openStreetPreview(proyecto) {
         // Mostrar panel
         previewPanel.style.display = 'block';
         previewPanel.setAttribute('aria-expanded', 'true');
-        console.log('[street] Panel mostrado');
         
         // Mostrar loading
         mlyDiv.style.display = 'none';
@@ -228,13 +216,10 @@ async function openStreetPreview(proyecto) {
             throw new Error('Coordenadas inválidas');
         }
         
-        console.log(`[street] Buscando imagen para proyecto: ${proyecto.nombre || 'Sin nombre'} en (${proyecto.lat}, ${proyecto.lon})`);
-        
         // Buscar imagen cercana
         const imageId = await findNearestImage(proyecto.lat, proyecto.lon, 100);
         
         if (imageId) {
-            console.log('[street] Imagen encontrada, abriendo viewer...');
             
             // Ocultar loading y mensaje sin cobertura
             if (loadingDiv) loadingDiv.style.display = 'none';
@@ -246,10 +231,8 @@ async function openStreetPreview(proyecto) {
             // Abrir viewer
             await openMapillaryViewer(imageId, 'mly');
             
-            console.log('[street] Viewer abierto exitosamente');
             
         } else {
-            console.log('[street] No se encontró imagen, mostrando fallback...');
             
             // Sin cobertura 360°
             if (loadingDiv) loadingDiv.style.display = 'none';

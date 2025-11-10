@@ -4,6 +4,7 @@ Módulo centralizado para evitar código duplicado
 """
 
 import sys
+import builtins
 
 # Función helper para reemplazar caracteres Unicode problemáticos
 def safe_encode(text):
@@ -49,5 +50,6 @@ def safe_print(*args, **kwargs):
 
 # Configurar print seguro en Windows
 if sys.platform == 'win32':
+    builtins.print = safe_print
     print = safe_print
 

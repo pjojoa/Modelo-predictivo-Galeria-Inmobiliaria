@@ -412,7 +412,6 @@
                                         <select id="marker-color-select" class="map-control-select" aria-label="Seleccionar criterio de color para marcadores">
                                             <option value="clasificacion">📊 Clasificación</option>
                                             <option value="vende">👤 Vendedor</option>
-                                            <option value="año">📅 Año</option>
                                             <option value="zona">🗺️ Zona</option>
                                             <option value="barrio">🏘️ Barrio</option>
                                             <option value="estrato">🏢 Estrato</option>
@@ -669,7 +668,6 @@
     <script>
         // Token de Mapillary - puede ser configurado desde el servidor
         window.MAPILLARY_TOKEN = '{{ mapillary_token|default("MLY|YOUR_TOKEN_HERE") }}';
-        console.log('[street] Token configurado:', window.MAPILLARY_TOKEN ? 'Sí' : 'No');
     </script>
     
     <!-- Módulo de vista previa 360° -->
