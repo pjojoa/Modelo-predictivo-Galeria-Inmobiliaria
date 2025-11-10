@@ -234,10 +234,13 @@ function mostrarRankingConstructores(ranking) {
     
     // Agregar event listeners para filtrado
     setupConstructorFiltering();
+    
+    // Inicializar estados visuales (asegurar que todas las filas estén visibles)
+    updateConstructorItemsState();
 }
 
-// Variable global para el constructor seleccionado
-let selectedConstructor = null;
+// Variables globales para selección de constructores (misma lógica que categorías)
+let selectedConstructors = new Set(); // IDs de los constructores seleccionados (Set para múltiples selecciones)
 
 // Configurar filtrado por constructor
 function setupConstructorFiltering() {
@@ -245,9 +248,9 @@ function setupConstructorFiltering() {
     
     constructorItems.forEach(item => {
         // Click
-        item.addEventListener('click', function() {
+        item.addEventListener('click', function(e) {
             const vendedor = this.getAttribute('data-vendedor');
-            toggleConstructorFilter(vendedor);
+            toggleConstructorFilter(vendedor, e);
         });
         
         // Teclado
@@ -255,48 +258,150 @@ function setupConstructorFiltering() {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 const vendedor = this.getAttribute('data-vendedor');
-                toggleConstructorFilter(vendedor);
+                toggleConstructorFilter(vendedor, e);
             }
         });
     });
 }
 
-// Toggle filtro de constructor
-function toggleConstructorFilter(vendedor) {
+// Toggle filtro de constructor (misma lógica que categorías)
+function toggleConstructorFilter(vendedor, event) {
     if (!vendedor || vendedor === '') return;
     
-    // Si ya está seleccionado, deseleccionar
-    if (selectedConstructor === vendedor) {
-        selectedConstructor = null;
-        // Remover selección visual
-        document.querySelectorAll('.constructor-item').forEach(item => {
-            item.classList.remove('selected');
-        });
-        // Remover filtro de vendedor
-        delete currentFilters.vende;
+    // Detectar si se presionó Ctrl (o Cmd en Mac)
+    const isCtrlPressed = event ? (event.ctrlKey || event.metaKey) : false;
+    const wasSelected = selectedConstructors.has(vendedor);
+    
+    if (isCtrlPressed) {
+        // Selección múltiple: toggle de este constructor sin afectar los demás
+        if (wasSelected) {
+            // Deseleccionar este constructor
+            selectedConstructors.delete(vendedor);
+        } else {
+            // Agregar a la selección
+            selectedConstructors.add(vendedor);
+        }
+        
+        // Actualizar filtro con todos los constructores seleccionados
+        if (selectedConstructors.size === 0) {
+            showAllConstructors();
+        } else {
+            filterBySelectedConstructors();
+        }
+        
+        // Solo actualizar estados visuales (NO regenerar HTML - todas las filas permanecen visibles)
+        updateConstructorItemsState();
     } else {
-        // Seleccionar nuevo constructor
-        selectedConstructor = vendedor;
-        // Actualizar selección visual
-        document.querySelectorAll('.constructor-item').forEach(item => {
-            if (item.getAttribute('data-vendedor') === vendedor) {
-                item.classList.add('selected');
+        // Sin Ctrl: selección única (reemplazar selección anterior)
+        if (wasSelected && selectedConstructors.size === 1) {
+            // Si solo este estaba seleccionado, deseleccionar todo
+            selectedConstructors.clear();
+            showAllConstructors();
+        } else {
+            // Limpiar selección anterior y seleccionar solo este
+            selectedConstructors.clear();
+            // Remover resaltado de todos los constructores
+            document.querySelectorAll('.constructor-item').forEach(i => {
+                i.classList.remove('selected');
+            });
+            
+            // Seleccionar este constructor
+            selectedConstructors.add(vendedor);
+            
+            // Filtrar para mostrar solo los proyectos de este constructor
+            filterBySelectedConstructors();
+            
+            // Solo actualizar estados visuales (NO regenerar HTML - todas las filas permanecen visibles)
+            updateConstructorItemsState();
+        }
+    }
+}
+
+// Filtrar mapa por constructores seleccionados
+function filterBySelectedConstructors() {
+    if (selectedConstructors.size === 0) {
+        showAllConstructors();
+        return;
+    }
+    
+    // Filtrar los datos usando el dataset original
+    const sourceData = proyectosDataOriginal.length > 0 ? proyectosDataOriginal : proyectosData;
+    
+    proyectosData = sourceData.filter(proyecto => {
+        const vendedor = String(proyecto.vende || 'N/A').trim();
+        return selectedConstructors.has(vendedor);
+    });
+    
+    // Actualizar todas las vistas con los datos filtrados
+    updateMap();
+    
+    // Enfocar en los puntos filtrados
+    if (proyectosData.length > 0) {
+        fitToData();
+    }
+    
+    updateTable();
+    updateStats();
+    
+    // Actualizar estados visuales de los items (sin ocultar filas, solo resaltar)
+    updateConstructorItemsState();
+}
+
+// Actualizar estados visuales de los items de constructores (estilo Power BI - transparencia)
+function updateConstructorItemsState() {
+    const constructorItems = document.querySelectorAll('.constructor-item');
+    if (!constructorItems || constructorItems.length === 0) return;
+    
+    const hasSelection = selectedConstructors.size > 0;
+    
+    constructorItems.forEach(item => {
+        const vendedor = item.getAttribute('data-vendedor');
+        const isSelected = selectedConstructors.has(vendedor);
+        
+        // Estilo Power BI: seleccionados opacos, no seleccionados transparentes
+        if (isSelected) {
+            item.classList.add('selected');
+            item.classList.remove('dimmed');
+            item.style.opacity = '1';
+            item.style.display = '';
+            item.style.visibility = 'visible';
+        } else {
+            item.classList.remove('selected');
+            // Solo aplicar transparencia si hay alguna selección
+            if (hasSelection) {
+                item.classList.add('dimmed');
+                item.style.opacity = '0.4';
             } else {
-                item.classList.remove('selected');
+                item.classList.remove('dimmed');
+                item.style.opacity = '1';
             }
-        });
-        // Aplicar filtro directamente
-        currentFilters.vende = vendedor;
+            item.style.display = '';
+            item.style.visibility = 'visible';
+        }
+    });
+}
+
+// Mostrar todos los constructores (restaurar vista completa)
+function showAllConstructors() {
+    // Limpiar la selección
+    selectedConstructors.clear();
+    
+    // Restaurar datos originales si existen
+    if (proyectosDataOriginal.length > 0) {
+        proyectosData = [...proyectosDataOriginal];
     }
     
-    // Recargar proyectos con el filtro aplicado
-    loadProyectos();
+    // Actualizar vistas
+    updateMap();
     
-    // Scroll suave al mapa
-    const mapElement = document.getElementById('map');
-    if (mapElement) {
-        mapElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    // Restaurar vista completa del mapa (centrar en todos los proyectos)
+    fitToData();
+    
+    updateTable();
+    updateStats();
+    
+    // Actualizar estados visuales de los items (remover resaltado)
+    updateConstructorItemsState();
 }
 
 // Inicializar mapa
@@ -1194,6 +1299,36 @@ function updateMap() {
     
     // Actualizar leyenda de categorías
     updateMarkerLegend();
+}
+
+// Enfocar el mapa en los proyectos actuales
+function fitToData() {
+    if (!map || !proyectosData || proyectosData.length === 0) {
+        return;
+    }
+    
+    // Obtener proyectos con coordenadas válidas
+    const validProjects = proyectosData.filter(p => {
+        const lat = parseFloat(p.lat);
+        const lon = parseFloat(p.lon);
+        return !isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0 &&
+               lat >= 3.0 && lat <= 4.5 && lon >= -77.5 && lon <= -76.0;
+    });
+    
+    if (validProjects.length === 0) {
+        return;
+    }
+    
+    // Calcular bounds
+    const bounds = validProjects.map(p => [parseFloat(p.lat), parseFloat(p.lon)]);
+    
+    if (bounds.length > 0) {
+        map.fitBounds(bounds, {
+            padding: [50, 50],
+            maxZoom: 15,
+            animate: true
+        });
+    }
 }
 
 // Cache de colores generados para evitar repeticiones

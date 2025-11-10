@@ -2396,6 +2396,16 @@ body {
     transform: translateX(4px) translateY(-2px);
 }
 
+.constructor-item.dimmed {
+    opacity: 0.4;
+    filter: grayscale(0.2);
+}
+
+.constructor-item.dimmed:hover {
+    opacity: 0.6;
+    filter: grayscale(0.1);
+}
+
 @keyframes slideIn {
     from {
         opacity: 0;
