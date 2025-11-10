@@ -2731,20 +2731,21 @@ function updateMarkerLegend() {
         return;
     }
     
-    if (!proyectosData || proyectosData.length === 0) {
+    const sourceData = proyectosDataOriginal.length > 0 ? proyectosDataOriginal : proyectosData;
+    const currentData = Array.isArray(proyectosData) ? proyectosData : [];
+    
+    if (!sourceData || sourceData.length === 0) {
         categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay datos disponibles</p></div>';
         return;
     }
     
-    // Obtener categorías únicas según el criterio seleccionado
     const categorias = new Map();
-    
-    proyectosData.forEach(proyecto => {
+    const getCategoriaInfo = (proyecto) => {
         let categoria = 'N/A';
         let color = '#95A5A6';
         
         switch (markerColorCriterion) {
-            case 'clasificacion':
+            case 'clasificacion': {
                 categoria = String(proyecto.clasificacion || 'Moderado').trim();
                 const colors = {
                     'Exitoso': '#27AE60',
@@ -2753,54 +2754,80 @@ function updateMarkerLegend() {
                 };
                 color = colors[categoria] || colors['Moderado'] || '#F39C12';
                 break;
-                
+            }
             case 'vende':
                 categoria = String(proyecto.vende || 'N/A').trim();
                 color = generateColorFromString(categoria);
                 break;
-                
             case 'zona':
                 categoria = String(proyecto.zona || 'N/A').trim();
                 color = generateColorFromString(categoria);
                 break;
-                
             case 'barrio':
                 categoria = String(proyecto.barrio || 'N/A').trim();
                 color = generateColorFromString(categoria);
                 break;
-                
             case 'estrato':
                 categoria = String(proyecto.estrato || 'N/A').trim();
                 color = generateColorFromString(categoria);
                 break;
-                
             case 'tipo_vis':
                 categoria = String(proyecto.tipo_vis || 'N/A').trim();
                 color = generateColorFromString(categoria);
                 break;
+            default:
+                categoria = 'N/A';
+                color = '#95A5A6';
         }
+        
+        if (!categoria || categoria === '') {
+            categoria = 'N/A';
+        }
+        
+        return { categoria, color };
+    };
+    
+    // Registrar totales por categoría usando el dataset base
+    sourceData.forEach(proyecto => {
+        const { categoria, color } = getCategoriaInfo(proyecto);
+        const id = categoria.toLowerCase().replace(/\s+/g, '-');
         
         if (!categorias.has(categoria)) {
             categorias.set(categoria, {
                 nombre: categoria,
-                color: color,
+                color,
                 count: 0,
-                id: categoria.toLowerCase().replace(/\s+/g, '-')
+                visibleCount: 0,
+                id
             });
         }
         
         categorias.get(categoria).count++;
     });
     
-    // Ordenar categorías
+    // Registrar cuántos elementos están visibles actualmente (dataset filtrado)
+    currentData.forEach(proyecto => {
+        const { categoria, color } = getCategoriaInfo(proyecto);
+        const id = categoria.toLowerCase().replace(/\s+/g, '-');
+        
+        if (!categorias.has(categoria)) {
+            categorias.set(categoria, {
+                nombre: categoria,
+                color,
+                count: 0,
+                visibleCount: 0,
+                id
+            });
+        }
+        
+        categorias.get(categoria).visibleCount++;
+    });
+    
+    // Obtener categorías únicas según el criterio seleccionado
     const categoriasArray = Array.from(categorias.values()).sort((a, b) => {
         if (a.nombre === 'N/A') return 1;
         if (b.nombre === 'N/A') return -1;
-        if (markerColorCriterion === 'año') {
-            return parseInt(a.nombre) - parseInt(b.nombre);
-        }
         if (markerColorCriterion === 'estrato') {
-            // Ordenar numéricamente para estrato
             const aNum = parseInt(a.nombre) || 0;
             const bNum = parseInt(b.nombre) || 0;
             return aNum - bNum;
