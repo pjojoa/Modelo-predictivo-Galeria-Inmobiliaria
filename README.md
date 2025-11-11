@@ -164,3 +164,41 @@ Este proyecto es de uso interno.
 - Font Awesome por los iconos
 - La comunidad de Flask por el framework
 
+## 🌐 Despliegue en Render
+
+Sigue estos pasos para desplegar:
+
+1) Requisitos en el repo
+- Archivo `requirements.txt` incluye `gunicorn`.
+- Archivo `Procfile` con:
+  ```
+  web: gunicorn app:app --workers 2 --threads 2 --timeout 180
+  ```
+- `render.yaml` con el servicio web Python, autoDeploy habilitado, y `startCommand` configurado.
+- `runtime.txt` (ej. `python-3.10.13`).
+
+2) Crear el servicio
+- Entra a `https://render.com` → New + → Web Service.
+- Conecta este repositorio.
+- Environment: Python.
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `gunicorn app:app --workers 2 --threads 2 --timeout 180`
+- Plan: Free (o superior).
+
+3) Variables de entorno
+- En Render → tu servicio → Environment:
+  - `MAPILLARY_TOKEN` (si usas Street Preview).
+  - `PYTHONUNBUFFERED=1` (opcional; ya definido en `render.yaml`).
+
+4) Auto‑deploy
+- `render.yaml` define `autoDeploy: true`. Cada push a `main` dispara un nuevo deploy automáticamente.
+
+5) Notas importantes
+- El servidor Gunicorn toma el puerto que Render expone (no cambies host/port en `app.py` para producción).
+- Si usas archivos locales (como `Base Proyectos.xlsx`), el filesystem es efímero. Inclúyelo en el repo o usa almacenamiento remoto.
+- Aumenta `--timeout` si algún endpoint tarda (180s por defecto).
+
+6) Troubleshooting
+- Verifica logs en Render → Logs si hay fallos de importación o rutas 404/500.
+- Si el build falla por dependencias, asegúrate de fijar versiones compatibles en `requirements.txt`.
+
