@@ -180,11 +180,10 @@ function setupSidebarControls() {
         
         lastFocused = document.activeElement;
         
-        // FORZAR visibilidad con estilos inline (máxima prioridad)
-        // NO usar cssText completo para permitir que el width se pueda modificar después
-        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+        // Obtener ancho actual (del localStorage o por defecto)
+        const currentWidth = parseInt(localStorage.getItem('sidebarWidth')) || 529;
         
-        // Aplicar estilos uno por uno, EXCEPTO width que se manejará por separado
+        // Aplicar estilos para panel ANCLADO (ocupa espacio en el layout)
         panel.style.setProperty('position', 'fixed', 'important');
         panel.style.setProperty('left', '0', 'important');
         panel.style.setProperty('top', '0', 'important');
@@ -198,13 +197,21 @@ function setupSidebarControls() {
         panel.style.setProperty('overflow', 'hidden', 'important');
         panel.style.setProperty('min-width', '280px', 'important');
         panel.style.setProperty('max-width', '90vw', 'important');
-        
-        // Width se aplica por separado para que pueda ser modificado
         panel.style.setProperty('width', currentWidth + 'px', 'important');
+        
+        // Actualizar variable CSS para que el contenido se ajuste
+        document.documentElement.style.setProperty('--panel-width', currentWidth + 'px');
         
         panel.classList.add('is-open');
         panel.setAttribute('aria-hidden', 'false');
         panel.removeAttribute('hidden');
+        
+        // Ajustar el contenido principal para que se desplace
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+            mainContent.style.setProperty('margin-left', currentWidth + 'px', 'important');
+            mainContent.style.setProperty('transition', 'margin-left var(--panel-ease)', 'important');
+        }
         
         // Backdrop deshabilitado - no oscurecer el fondo
         backdrop.hidden = true;
@@ -219,7 +226,7 @@ function setupSidebarControls() {
         toggle.setAttribute('aria-expanded', 'true');
         toggle.setAttribute('title', 'Ocultar Panel');
         // Mover botón cuando el panel se abre (usar el ancho actual del panel)
-        const panelWidth = panel.offsetWidth || parseInt(getComputedStyle(panel).width) || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+        const panelWidth = panel.offsetWidth || parseInt(getComputedStyle(panel).width) || parseInt(localStorage.getItem('sidebarWidth')) || 529;
         toggle.style.left = panelWidth + 'px';
         toggle.style.transform = 'translateY(-50%) rotate(180deg)';
         
@@ -266,18 +273,8 @@ function setupSidebarControls() {
         
         document.body.classList.add('panel-open');
         
-        // Aplicar inert al contenido principal si está disponible
-        try {
-            if (main.setAttribute) {
-                main.setAttribute('inert', '');
-            }
-        } catch (_) {
-            // Fallback: usar aria-hidden
-            const mainContent = document.querySelector('.main-content');
-            if (mainContent) {
-                mainContent.setAttribute('aria-hidden', 'true');
-            }
-        }
+        // NO aplicar inert al contenido principal cuando está anclado (permite interacción)
+        // El panel anclado no bloquea el contenido, solo lo desplaza
         
         // Enfoque inicial en el primer elemento enfocable del panel
         setTimeout(() => {
@@ -304,17 +301,16 @@ function setupSidebarControls() {
             return;
         }
         
-        // FORZAR cierre con estilos inline (máxima prioridad)
         // Mantener el ancho actual al cerrar (no resetear)
-        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 529;
         
-        // Usar setProperty en lugar de cssText para permitir redimensionamiento futuro
+        // Ocultar el panel (solo se oculta, no se ancla)
         panel.style.setProperty('position', 'fixed', 'important');
         panel.style.setProperty('left', '0', 'important');
         panel.style.setProperty('top', '0', 'important');
         panel.style.setProperty('bottom', '0', 'important');
         panel.style.setProperty('height', '100vh', 'important');
-        panel.style.setProperty('transform', 'translateX(-100%)', 'important');
+        panel.style.setProperty('transform', 'translateX(-100%)', 'important'); // Oculto completamente
         panel.style.setProperty('visibility', 'visible', 'important');
         panel.style.setProperty('opacity', '1', 'important');
         panel.style.setProperty('display', 'flex', 'important');
@@ -323,6 +319,13 @@ function setupSidebarControls() {
         panel.style.setProperty('min-width', '280px', 'important');
         panel.style.setProperty('max-width', '90vw', 'important');
         panel.style.setProperty('width', currentWidth + 'px', 'important');
+        
+        // Restaurar el contenido principal (sin margin-left)
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+            mainContent.style.setProperty('margin-left', '0', 'important');
+            mainContent.style.setProperty('transition', 'margin-left var(--panel-ease)', 'important');
+        }
         
         panel.classList.remove('is-open');
         panel.setAttribute('aria-hidden', 'true');
@@ -346,17 +349,7 @@ function setupSidebarControls() {
         toggle.style.transform = 'translateY(-50%)';
         document.body.classList.remove('panel-open');
         
-        // Remover inert
-        try {
-            if (main.removeAttribute) {
-                main.removeAttribute('inert');
-            }
-        } catch (_) {
-            const mainContent = document.querySelector('.main-content');
-            if (mainContent) {
-                mainContent.removeAttribute('aria-hidden');
-            }
-        }
+        // NO necesitamos remover inert porque no lo aplicamos cuando está anclado
         
         // Devolver foco al elemento que abrió el panel
         if (lastFocused && typeof lastFocused.focus === 'function') {
@@ -479,7 +472,7 @@ function setupSidebarControls() {
             // Obtener ancho actual de múltiples formas
             const computedWidth = parseInt(getComputedStyle(panel).width);
             const offsetWidth = panel.offsetWidth;
-            startWidth = offsetWidth || computedWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+            startWidth = offsetWidth || computedWidth || parseInt(localStorage.getItem('sidebarWidth')) || 529;
             
             console.log('[Resize] Iniciando redimensionamiento:', {
                 startX: startX,
@@ -506,63 +499,45 @@ function setupSidebarControls() {
         function handleResize(e) {
             if (!isResizing) return;
             
-            e.preventDefault(); // Prevenir scroll horizontal
-            e.stopPropagation(); // Prevenir propagación
+            e.preventDefault();
+            e.stopPropagation();
             
             const diff = e.clientX - startX;
             const newWidth = Math.max(280, Math.min(window.innerWidth * 0.9, startWidth + diff));
             
-            // FORZAR actualización del ancho - método directo sin transiciones
-            // Asegurar que no haya transiciones que interfieran
+            // DESHABILITAR todas las transiciones durante el redimensionamiento (como la consola del navegador)
             panel.style.transition = 'none';
             panel.style.setProperty('transition', 'none', 'important');
             
-            // Aplicar el nuevo ancho de múltiples formas para asegurar que funcione
+            // Método DIRECTO y SÍNCRONO: aplicar width inmediatamente (como la consola del navegador)
+            // NO usar requestAnimationFrame - debe ser instantáneo
             panel.style.width = newWidth + 'px';
             panel.style.setProperty('width', newWidth + 'px', 'important');
             
-            // Forzar reflow inmediato
-            const forceReflow = panel.offsetWidth;
+            // Forzar reflow inmediato para aplicar el cambio
+            void panel.offsetWidth;
             
-            // Verificar que se aplicó
-            const appliedWidth = panel.offsetWidth;
+            // Actualizar variable CSS dinámicamente
+            document.documentElement.style.setProperty('--panel-width', newWidth + 'px');
             
-            // Si aún no coincide, usar método más agresivo
-            if (Math.abs(newWidth - appliedWidth) > 1) {
-                // Remover todos los estilos de width primero
-                const currentStyle = panel.getAttribute('style') || '';
-                // Remover width de cualquier forma
-                let cleanStyle = currentStyle
-                    .replace(/width\s*:\s*[^;!]+(!important)?/gi, '')
-                    .replace(/width\s*:\s*[^;]+/gi, '')
-                    .replace(/;\s*;/g, ';')
-                    .trim();
-                
-                // Agregar el nuevo width al final
-                if (cleanStyle && !cleanStyle.endsWith(';')) {
-                    cleanStyle += ';';
-                }
-                cleanStyle += ' width: ' + newWidth + 'px !important;';
-                
-                panel.setAttribute('style', cleanStyle);
-                
-                // Forzar reflow de nuevo
-                const forceReflow2 = panel.offsetWidth;
-            }
-            
-            // Actualizar posición del botón toggle si el panel está abierto
+            // Actualizar posición del botón toggle en tiempo real
             if (panel.classList.contains('is-open') && toggle) {
                 toggle.style.left = newWidth + 'px';
             }
             
-            // Guardar ancho en localStorage
-            localStorage.setItem('sidebarWidth', newWidth.toString());
+            // Actualizar margin-left del contenido principal en tiempo real (sin transición)
+            const mainContent = document.querySelector('.main-content');
+            if (mainContent && panel.classList.contains('is-open')) {
+                mainContent.style.transition = 'none';
+                mainContent.style.marginLeft = newWidth + 'px';
+                mainContent.style.setProperty('margin-left', newWidth + 'px', 'important');
+            }
             
-            console.log('[Resize] Ancho actualizado:', {
-                intentado: newWidth,
-                aplicado: panel.offsetWidth,
-                diff: Math.abs(newWidth - panel.offsetWidth)
-            });
+            // Guardar en localStorage (throttle para no saturar)
+            if (!handleResize.lastSave || Date.now() - handleResize.lastSave > 100) {
+                localStorage.setItem('sidebarWidth', newWidth.toString());
+                handleResize.lastSave = Date.now();
+            }
         }
         
         function stopResize(e) {
@@ -575,6 +550,12 @@ function setupSidebarControls() {
             panel.style.transition = '';
             panel.style.removeProperty('transition');
             
+            // Rehabilitar transición del contenido principal
+            const mainContent = document.querySelector('.main-content');
+            if (mainContent) {
+                mainContent.style.transition = 'margin-left var(--panel-ease)';
+            }
+            
             // Remover listeners
             document.removeEventListener('mousemove', handleResize);
             document.removeEventListener('mouseup', stopResize);
@@ -583,7 +564,12 @@ function setupSidebarControls() {
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             
-            console.log('[Resize] Ancho final guardado:', panel.offsetWidth);
+            // Guardar ancho final y actualizar variable CSS
+            const finalWidth = panel.offsetWidth;
+            localStorage.setItem('sidebarWidth', finalWidth.toString());
+            document.documentElement.style.setProperty('--panel-width', finalWidth + 'px');
+            
+            console.log('[Resize] Ancho final guardado:', finalWidth);
         }
         
         // Cargar ancho guardado al iniciar
@@ -3383,8 +3369,21 @@ function updateMarkerLegend() {
     const categoriesList = document.getElementById('categories-list');
     const categoriesTitle = document.getElementById('categories-panel-title');
     const categoriesSubtitle = document.getElementById('categories-subtitle');
+    const categoriesPanel = document.getElementById('categories-panel-sidebar');
     
-    if (!categoriesList) {
+    // Ocultar SOLO el panel de filtrado de categorías cuando el criterio es "clasificacion"
+    // Pero permitir que se generen las categorías para la tabla de estadísticas
+    if (categoriesPanel) {
+        if (markerColorCriterion === 'clasificacion') {
+            categoriesPanel.style.display = 'none';
+        } else {
+            categoriesPanel.style.display = '';
+        }
+    }
+    
+    // Si no hay lista de categorías, continuar de todas formas para generar allCategories
+    // (necesario para la tabla de estadísticas)
+    if (!categoriesList && markerColorCriterion !== 'clasificacion') {
         return;
     }
     
@@ -3392,7 +3391,13 @@ function updateMarkerLegend() {
     const currentData = Array.isArray(proyectosData) ? proyectosData : [];
     
     if (!sourceData || sourceData.length === 0) {
-        categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay datos disponibles</p></div>';
+        if (categoriesList) {
+            categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay datos disponibles</p></div>';
+        }
+        // Limpiar allCategories si no hay datos
+        allCategories = [];
+        // Aún así, actualizar el panel de estadísticas
+        updateCategoryStatsPanel();
         return;
     }
     
@@ -3500,7 +3505,7 @@ function updateMarkerLegend() {
     
     // Actualizar título y subtítulo
     const titulos = {
-        'clasificacion': 'Filtrar Clasificación',
+        'clasificacion': 'Clasificación', // Eliminado "Filtrar" según solicitud del usuario
         'vende': 'Filtrar Vendedor',
         'zona': 'Filtrar Zona',
         'barrio': 'Filtrar Barrio'
@@ -3519,84 +3524,89 @@ function updateMarkerLegend() {
         categoriesSubtitle.textContent = subtitulos[markerColorCriterion] || 'Selecciona las categorías a mostrar';
     }
     
-    // Generar HTML de las categorías
-    if (categoriasArray.length === 0) {
-        categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay categorías disponibles</p></div>';
-        updateCategoriesCount();
-        return;
-    }
-    
-    // Filtrar por búsqueda
-    const searchInput = document.getElementById('categories-search');
-    const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
-    const filteredCategories = categoriasArray.filter(cat => {
-        if (!searchQuery) return true;
-        return cat.nombre.toLowerCase().includes(searchQuery);
-    });
-    
-    let html = '';
-    filteredCategories.forEach(cat => {
-        const isSelected = selectedCategories.has(cat.id); // Selección múltiple
-        html += `
-            <div class="categories-item ${isSelected ? 'selected' : ''}" data-category-id="${cat.id}">
-                <input type="checkbox" id="cat-${cat.id}" ${isSelected ? 'checked' : ''} data-category-id="${cat.id}">
-                <label for="cat-${cat.id}" class="categories-item-checkbox"></label>
-                <span class="categories-item-color" style="background-color: ${cat.color};"></span>
-                <div class="categories-item-info">
-                    <div class="categories-item-name">${escapeHtml(cat.nombre)}</div>
-                    <div class="categories-item-count">${cat.count} proyecto${cat.count !== 1 ? 's' : ''}</div>
-                </div>
-            </div>
-        `;
-    });
-    
-    if (filteredCategories.length === 0) {
-        html = '<div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div>';
-    }
-    
-    categoriesList.innerHTML = html;
-    
-    // Agregar event listeners a los checkboxes (selección múltiple)
-    categoriesList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-        checkbox.addEventListener('change', function() {
-            const categoryId = this.getAttribute('data-category-id');
-            const item = this.closest('.categories-item');
-            
-            if (this.checked) {
-                // Agregar a la selección
-                selectedCategories.add(categoryId);
-                if (item) item.classList.add('selected');
-            } else {
-                // Remover de la selección
-                selectedCategories.delete(categoryId);
-                if (item) item.classList.remove('selected');
-            }
-            
-            // Actualizar filtro
-            if (selectedCategories.size === 0) {
-                showAllCategories();
-            } else {
-                filterBySelectedCategories();
-            }
-            
+    // Solo actualizar el HTML de la lista si el panel está visible (no es "clasificacion")
+    if (categoriesList && markerColorCriterion !== 'clasificacion') {
+        // Generar HTML de las categorías
+        if (categoriasArray.length === 0) {
+            categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay categorías disponibles</p></div>';
             updateCategoriesCount();
+            // Aún así, actualizar el panel de estadísticas
+            updateCategoryStatsPanel();
+            return;
+        }
+        
+        // Filtrar por búsqueda
+        const searchInput = document.getElementById('categories-search');
+        const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
+        const filteredCategories = categoriasArray.filter(cat => {
+            if (!searchQuery) return true;
+            return cat.nombre.toLowerCase().includes(searchQuery);
         });
-    });
-    
-    // Agregar event listener al item completo (click en cualquier parte)
-    categoriesList.querySelectorAll('.categories-item').forEach(item => {
-        item.addEventListener('click', function(e) {
-            if (e.target.type !== 'checkbox' && e.target.tagName !== 'LABEL') {
-                const checkbox = this.querySelector('input[type="checkbox"]');
-                if (checkbox) {
-                    checkbox.checked = !checkbox.checked;
-                    checkbox.dispatchEvent(new Event('change'));
+        
+        let html = '';
+        filteredCategories.forEach(cat => {
+            const isSelected = selectedCategories.has(cat.id); // Selección múltiple
+            html += `
+                <div class="categories-item ${isSelected ? 'selected' : ''}" data-category-id="${cat.id}">
+                    <input type="checkbox" id="cat-${cat.id}" ${isSelected ? 'checked' : ''} data-category-id="${cat.id}">
+                    <label for="cat-${cat.id}" class="categories-item-checkbox"></label>
+                    <span class="categories-item-color" style="background-color: ${cat.color};"></span>
+                    <div class="categories-item-info">
+                        <div class="categories-item-name">${escapeHtml(cat.nombre)}</div>
+                        <div class="categories-item-count">${cat.count} proyecto${cat.count !== 1 ? 's' : ''}</div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        if (filteredCategories.length === 0) {
+            html = '<div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div>';
+        }
+        
+        categoriesList.innerHTML = html;
+        
+        // Agregar event listeners a los checkboxes (selección múltiple)
+        categoriesList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const categoryId = this.getAttribute('data-category-id');
+                const item = this.closest('.categories-item');
+                
+                if (this.checked) {
+                    // Agregar a la selección
+                    selectedCategories.add(categoryId);
+                    if (item) item.classList.add('selected');
+                } else {
+                    // Remover de la selección
+                    selectedCategories.delete(categoryId);
+                    if (item) item.classList.remove('selected');
                 }
-            }
+                
+                // Actualizar filtro
+                if (selectedCategories.size === 0) {
+                    showAllCategories();
+                } else {
+                    filterBySelectedCategories();
+                }
+                
+                updateCategoriesCount();
+            });
         });
-    });
-    
-    updateCategoriesCount();
+        
+        // Agregar event listener al item completo (click en cualquier parte)
+        categoriesList.querySelectorAll('.categories-item').forEach(item => {
+            item.addEventListener('click', function(e) {
+                if (e.target.type !== 'checkbox' && e.target.tagName !== 'LABEL') {
+                    const checkbox = this.querySelector('input[type="checkbox"]');
+                    if (checkbox) {
+                        checkbox.checked = !checkbox.checked;
+                        checkbox.dispatchEvent(new Event('change'));
+                    }
+                }
+            });
+        });
+        
+        updateCategoriesCount();
+    }
     
     // Actualizar panel de estadísticas con información de categorías
     updateCategoryStatsPanel();

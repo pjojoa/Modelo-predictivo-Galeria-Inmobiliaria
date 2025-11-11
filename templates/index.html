@@ -143,8 +143,8 @@
             
                     <!-- Pestaña: Estadísticas y Categorías -->
                     <div class="tab-pane" id="tab-estadisticas">
-                        <!-- Panel de Categorías de Clasificación -->
-                        <div class="categories-panel-sidebar" id="categories-panel-sidebar">
+                        <!-- Panel de Categorías de Clasificación (oculto cuando el criterio es "clasificacion") -->
+                        <div class="categories-panel-sidebar" id="categories-panel-sidebar" style="display: none;">
                             <div class="categories-sidebar-header">
                                 <div class="categories-sidebar-header-left">
                                     <i class="fas fa-layer-group"></i>
@@ -711,7 +711,7 @@
                     if (isOpen) {
                         // CERRAR panel
                         console.log('[TEST] Cerrando panel...');
-                        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+                        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 529;
                         panel.style.cssText = `
                             position: fixed !important;
                             left: 0 !important;
@@ -736,7 +736,7 @@
                     } else {
                         // ABRIR panel
                         console.log('[TEST] Abriendo panel...');
-                        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 418;
+                        const currentWidth = panel.offsetWidth || parseInt(localStorage.getItem('sidebarWidth')) || 529;
                         // Usar setProperty en lugar de cssText para permitir redimensionamiento
                         panel.style.setProperty('position', 'fixed', 'important');
                         panel.style.setProperty('left', '0', 'important');

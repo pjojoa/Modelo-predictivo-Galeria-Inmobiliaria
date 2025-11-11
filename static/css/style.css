@@ -12,7 +12,7 @@
     --improve-color: #E74C3C;
     
     /* Variables para panel off-canvas */
-    --panel-width: 418px; /* 380px + 10% = 418px */
+    --panel-width: 529px; /* 460px + 15% = 529px */
     --panel-ease: 240ms ease;
     --z-panel: 10000; /* Z-index muy alto para estar sobre todo, incluyendo controles de Leaflet */
     --z-backdrop: 900;
@@ -76,7 +76,7 @@ body {
     overflow: visible; /* Asegurar que el panel fixed no se corte */
 }
 
-/* Sidebar - Panel Off-Canvas Deslizante */
+/* Sidebar - Panel Anclable */
 .sidebar {
     width: var(--panel-width);
     min-width: 280px;
@@ -96,9 +96,9 @@ body {
     left: 0;
     top: 0;
     bottom: 0;
-    transform: translateX(-100%);
+    transform: translateX(-100%); /* Oculto por defecto */
     transition: transform var(--panel-ease);
-    /* NO incluir width en la transición para permitir redimensionamiento */
+    /* NO incluir width en la transición para permitir redimensionamiento fluido (como la consola del navegador) */
     transition-property: transform !important;
     overflow: hidden;
     z-index: 10000 !important; /* Z-index muy alto para estar sobre controles de Leaflet (que usan ~1000) */
@@ -110,12 +110,13 @@ body {
     box-sizing: border-box;
 }
 
-/* Panel abierto */
+/* Panel abierto - ANCLADO al lado izquierdo */
 .sidebar.is-open {
     transform: translateX(0) !important;
     visibility: visible !important;
     opacity: 1 !important;
     z-index: 10000 !important; /* Asegurar que esté por encima de todo */
+    /* Cuando está abierto, el panel está anclado y ocupa espacio */
 }
 
 /* Asegurar que el panel esté por encima de controles de Leaflet */
@@ -225,10 +226,10 @@ body:has(.sidebar.is-open) #togglePanelBtn.sidebar-toggle-btn,
 
 /* Estilos antiguos del botón removidos - ahora usa .sidebar-toggle-btn */
 
-/* Prevenir scroll del body cuando el panel está abierto */
-body.panel-open {
+/* NO bloquear scroll del body cuando el panel está abierto (el panel está anclado, no es un overlay modal) */
+/* body.panel-open {
     overflow: hidden;
-}
+} */
 
 /* Desactivar animaciones para usuarios que prefieren movimiento reducido */
 @media (prefers-reduced-motion: reduce) {
@@ -945,6 +946,18 @@ body.panel-open {
     min-width: 0;
     display: flex;
     flex-direction: column;
+    transition: margin-left var(--panel-ease);
+}
+
+/* Cuando el panel está abierto, el contenido principal se ajusta */
+body:has(.sidebar.is-open) .main-content {
+    margin-left: var(--panel-width);
+}
+
+/* Ajuste dinámico cuando el panel está abierto */
+.sidebar.is-open ~ .main-container .main-content,
+.main-container:has(.sidebar.is-open) ~ .main-content {
+    margin-left: var(--panel-width);
 }
 
 /* Sección de información */
