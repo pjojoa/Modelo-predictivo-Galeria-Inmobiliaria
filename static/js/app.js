@@ -14,12 +14,18 @@ let currentFilters = {
     tipo_vis: 'Todos',
     estado: 'Activos',  // Por defecto: Activos
     precio_min: null,
-    precio_max: null
+    precio_max: null,
+    area_min: null,
+    area_max: null,
+    search_query: ''
 };
 let tableSort = {
     column: null,
     direction: 'asc' // 'asc' o 'desc'
 };
+
+// Variable global para el gráfico circular
+let pieChart = null;
 
 // Variables globales para controles del mapa
 let currentBaseLayer = null;
@@ -51,7 +57,8 @@ document.addEventListener('DOMContentLoaded', function() {
     setupToolbarToggle();
     setupMarkerLegendToggle();
     setupCategoriesPanel();
-    setupCategoryTableToggle();
+    setupInfoModal();
+    setupFilterControlsExtras();
 });
 
 // Configurar vista previa 360°
@@ -73,6 +80,115 @@ function setupStreetPreview() {
                 }
             }
         });
+    }
+}
+
+// Filtros: Área y Búsqueda de Proyecto
+function setupFilterControlsExtras() {
+    const searchInput = document.getElementById('proyecto_search');
+    const searchClear = document.getElementById('proyecto_search_clear');
+    const areaMin = document.getElementById('area_min');
+    const areaMax = document.getElementById('area_max');
+    const areaApply = document.getElementById('aplicar_area');
+    const areaClear = document.getElementById('limpiar_area');
+    const areaInfo = document.getElementById('area_range_info');
+
+    if (searchInput && searchClear) {
+        searchInput.addEventListener('input', () => {
+            currentFilters.search_query = (searchInput.value || '').trim().toLowerCase();
+            searchClear.style.display = currentFilters.search_query ? 'inline-flex' : 'none';
+            applyAllFiltersAndRender();
+        });
+        searchClear.addEventListener('click', () => {
+            searchInput.value = '';
+            currentFilters.search_query = '';
+            searchClear.style.display = 'none';
+            applyAllFiltersAndRender();
+        });
+    }
+
+    function updateAreaInfo() {
+        const min = areaMin && areaMin.value !== '' ? parseFloat(areaMin.value) : null;
+        const max = areaMax && areaMax.value !== '' ? parseFloat(areaMax.value) : null;
+        if (areaInfo) {
+            if (min === null && max === null) {
+                areaInfo.textContent = 'Rango completo disponible';
+            } else if (min !== null && max === null) {
+                areaInfo.textContent = `Desde ${min.toFixed(1)} m²`;
+            } else if (min === null && max !== null) {
+                areaInfo.textContent = `Hasta ${max.toFixed(1)} m²`;
+            } else {
+                areaInfo.textContent = `${min.toFixed(1)} – ${max.toFixed(1)} m²`;
+            }
+        }
+    }
+
+    if (areaMin) areaMin.addEventListener('input', updateAreaInfo);
+    if (areaMax) areaMax.addEventListener('input', updateAreaInfo);
+
+    if (areaApply) {
+        areaApply.addEventListener('click', () => {
+            currentFilters.area_min = areaMin && areaMin.value !== '' ? parseFloat(areaMin.value) : null;
+            currentFilters.area_max = areaMax && areaMax.value !== '' ? parseFloat(areaMax.value) : null;
+            updateAreaInfo();
+            applyAllFiltersAndRender();
+        });
+    }
+    if (areaClear) {
+        areaClear.addEventListener('click', () => {
+            if (areaMin) areaMin.value = '';
+            if (areaMax) areaMax.value = '';
+            currentFilters.area_min = null;
+            currentFilters.area_max = null;
+            updateAreaInfo();
+            applyAllFiltersAndRender();
+        });
+    }
+}
+
+// Pipeline de filtrado (tabla + mapa si es posible)
+function applyAllFiltersAndRender() {
+    try {
+        let filtered = Array.isArray(proyectosDataOriginal) ? [...proyectosDataOriginal] : [];
+
+        // Filtro por búsqueda (nombre de proyecto)
+        if (currentFilters.search_query) {
+            filtered = filtered.filter(p =>
+                (String(p.Proyecto || p.nombre || '').toLowerCase().includes(currentFilters.search_query))
+            );
+        }
+        // Filtro por área
+        if (currentFilters.area_min !== null || currentFilters.area_max !== null) {
+            filtered = filtered.filter(p => {
+                const area = parseFloat(p.area_promedio || p.Area || p['Área (m²)'] || p['Área'] || p.area);
+                if (Number.isNaN(area)) return false;
+                if (currentFilters.area_min !== null && area < currentFilters.area_min) return false;
+                if (currentFilters.area_max !== null && area > currentFilters.area_max) return false;
+                return true;
+            });
+        }
+
+        // Asignar y renderizar si existen funciones de render ya definidas
+        proyectosData = filtered;
+
+        if (typeof updateMap === 'function') {
+            updateMap(); // re-pinta el mapa con proyectosData
+        }
+        if (typeof renderProjectsTable === 'function') {
+            renderProjectsTable(proyectosData);
+        } else {
+            // Fallback: actualizar contador si existe
+            const countEl = document.getElementById('map-count');
+            if (countEl) countEl.textContent = String(proyectosData.length || 0);
+        }
+
+        // Recalcular ranking si aplica
+        if (typeof loadRankingConstructores === 'function') {
+            // Mantener filtro de estado actual
+            loadRankingConstructores(currentFilters.estado || 'Activos');
+        }
+    } catch (e) {
+        console.warn('[applyAllFiltersAndRender] No se pudo aplicar filtros:', e);
     }
 }
 
@@ -108,22 +224,49 @@ function setupToolbarToggle() {
 
 // Configurar sistema de pestañas
 function setupTabs() {
-    const tabButtons = document.querySelectorAll('.sidebar-tab');
-    const tabContents = document.querySelectorAll('.tab-pane');
+    // Pestañas del sidebar
+    const sidebarTabButtons = document.querySelectorAll('.sidebar-tab');
+    const sidebarTabContents = document.querySelectorAll('.tab-pane');
     
-    tabButtons.forEach(button => {
+    sidebarTabButtons.forEach(button => {
         button.addEventListener('click', () => {
             const targetTab = button.getAttribute('data-tab');
             
             // Remover clase active de todos los botones y contenidos
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            tabContents.forEach(content => content.classList.remove('active'));
+            sidebarTabButtons.forEach(btn => btn.classList.remove('active'));
+            sidebarTabContents.forEach(content => content.classList.remove('active'));
             
             // Agregar clase active al botón y contenido seleccionado
             button.classList.add('active');
             const targetPane = document.getElementById(`tab-${targetTab}`);
             if (targetPane) {
                 targetPane.classList.add('active');
+            }
+        });
+    });
+    
+    // Pestañas de Tabla/Características
+    const mainTabButtons = document.querySelectorAll('.tabs-header .tab-button');
+    const mainTabContents = document.querySelectorAll('.tabs-container .tab-content');
+    
+    mainTabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const targetTab = button.getAttribute('data-tab');
+            
+            // Remover clase active de todos los botones y contenidos
+            mainTabButtons.forEach(btn => btn.classList.remove('active'));
+            mainTabContents.forEach(content => content.classList.remove('active'));
+            
+            // Agregar clase active al botón y contenido seleccionado
+            button.classList.add('active');
+            const targetPane = document.getElementById(`tab-${targetTab}`);
+            if (targetPane) {
+                targetPane.classList.add('active');
+                
+                // Si se selecciona la pestaña de características, cargar los datos
+                if (targetTab === 'caracteristicas') {
+                    loadCaracteristicasExitosos();
+                }
             }
         });
     });
@@ -227,8 +370,8 @@ function setupSidebarControls() {
         toggle.setAttribute('title', 'Ocultar Panel');
         // Mover botón cuando el panel se abre (usar el ancho actual del panel)
         const panelWidth = panel.offsetWidth || parseInt(getComputedStyle(panel).width) || parseInt(localStorage.getItem('sidebarWidth')) || 529;
-        toggle.style.left = panelWidth + 'px';
-        toggle.style.transform = 'translateY(-50%) rotate(180deg)';
+        toggle.style.setProperty('left', panelWidth + 'px', 'important');
+        toggle.style.setProperty('transform', 'translateY(-50%) rotate(180deg)', 'important');
         
         // Asegurar que el handle de redimensionamiento sea visible y funcional
         const resizeHandle = document.getElementById('sidebar-resize-handle');
@@ -344,9 +487,9 @@ function setupSidebarControls() {
         
         toggle.setAttribute('aria-expanded', 'false');
         toggle.setAttribute('title', 'Expandir Panel');
-        // Mover botón de vuelta cuando el panel se cierra
-        toggle.style.left = '0';
-        toggle.style.transform = 'translateY(-50%)';
+        // Mover botón de vuelta cuando el panel se cierra (al borde izquierdo)
+        toggle.style.setProperty('left', '0', 'important');
+        toggle.style.setProperty('transform', 'translateY(-50%)', 'important');
         document.body.classList.remove('panel-open');
         
         // NO necesitamos remover inert porque no lo aplicamos cuando está anclado
@@ -520,9 +663,9 @@ function setupSidebarControls() {
             // Actualizar variable CSS dinámicamente
             document.documentElement.style.setProperty('--panel-width', newWidth + 'px');
             
-            // Actualizar posición del botón toggle en tiempo real
+            // Actualizar posición del botón toggle en tiempo real (en el borde derecho del panel)
             if (panel.classList.contains('is-open') && toggle) {
-                toggle.style.left = newWidth + 'px';
+                toggle.style.setProperty('left', newWidth + 'px', 'important');
             }
             
             // Actualizar margin-left del contenido principal en tiempo real (sin transición)
@@ -785,7 +928,7 @@ function toggleConstructorFilter(vendedor, event) {
         if (wasSelected) {
             // Deseleccionar este constructor
             selectedConstructors.delete(vendedor);
-        } else {
+    } else {
             // Agregar a la selección
             selectedConstructors.add(vendedor);
         }
@@ -868,17 +1011,17 @@ function updateConstructorItemsState() {
         
         // Estilo Power BI: seleccionados opacos, no seleccionados transparentes
         if (isSelected) {
-            item.classList.add('selected');
+                item.classList.add('selected');
             item.classList.remove('dimmed');
             item.style.opacity = '1';
             item.style.display = '';
             item.style.visibility = 'visible';
-        } else {
-            item.classList.remove('selected');
-            // Solo aplicar transparencia si hay alguna selección
+            } else {
+                item.classList.remove('selected');
+            // Solo aplicar transparencia si hay alguna selección (más transparente para mayor contraste)
             if (hasSelection) {
                 item.classList.add('dimmed');
-                item.style.opacity = '0.4';
+                item.style.opacity = '0.25';
             } else {
                 item.classList.remove('dimmed');
                 item.style.opacity = '1';
@@ -1099,11 +1242,33 @@ function updatePriceRangeInfo() {
 // Cargar características de proyectos exitosos
 async function loadCaracteristicasExitosos() {
     try {
+        // Cargar características tradicionales
         const response = await fetch('/api/caracteristicas-exitosos');
         const data = await response.json();
         
+        // Cargar correlaciones para obtener las características más fuertes
+        let topCaracteristicas = [];
+        try {
+            const corrResponse = await fetch('/api/correlaciones-exito');
+            const corrData = await corrResponse.json();
+            
+            if (corrData.success && corrData.top_caracteristicas_fuertes) {
+                topCaracteristicas = corrData.top_caracteristicas_fuertes;
+                console.log('[loadCaracteristicasExitosos] Top características cargadas:', topCaracteristicas.length);
+                console.log('[loadCaracteristicasExitosos] Top características:', topCaracteristicas);
+            } else {
+                console.warn('[loadCaracteristicasExitosos] No se encontraron top_caracteristicas_fuertes en la respuesta:', {
+                    success: corrData.success,
+                    hasTopCaracteristicas: !!corrData.top_caracteristicas_fuertes,
+                    keys: Object.keys(corrData)
+                });
+            }
+        } catch (corrError) {
+            console.warn('[loadCaracteristicasExitosos] No se pudieron cargar correlaciones:', corrError);
+        }
+        
         if (data.success && data.caracteristicas) {
-            mostrarCaracteristicasExitosos(data.caracteristicas);
+            mostrarCaracteristicasExitosos(data.caracteristicas, topCaracteristicas);
         } else {
             document.getElementById('caracteristicas-exitosos').innerHTML = 
                 '<div class="loading-state"><i class="fas fa-exclamation-triangle"></i><p>No hay datos disponibles. Regenera la clasificación.</p></div>';
@@ -1116,7 +1281,7 @@ async function loadCaracteristicasExitosos() {
 }
 
 // Mostrar características de proyectos exitosos en la UI
-function mostrarCaracteristicasExitosos(caracteristicas) {
+function mostrarCaracteristicasExitosos(caracteristicas, topCaracteristicas = []) {
     const container = document.getElementById('caracteristicas-exitosos');
     
     // Validación
@@ -1125,332 +1290,552 @@ function mostrarCaracteristicasExitosos(caracteristicas) {
         return;
     }
     
-    // Debug: Log de estructura de amenidades
-    if (caracteristicas.amenidades) {
-        if (caracteristicas.amenidades.amenidades_exitosos) {
+    console.log('[mostrarCaracteristicasExitosos] Top características recibidas:', topCaracteristicas.length);
+    const formatNumber = (value, decimals = 2) => {
+        if (value === null || value === undefined || Number.isNaN(value)) return 'N/D';
+        return Number(value).toLocaleString('es-CO', {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals
+        });
+    };
+    const formatInteger = (value) => {
+        if (value === null || value === undefined || Number.isNaN(value)) return 'N/D';
+        return Math.round(Number(value)).toLocaleString('es-CO');
+    };
+    const metodoLabels = {
+        numerico_binario: 'Indicador numérico (0/1)',
+        numerico_general: 'Valor numérico > 0',
+        texto_binario: 'Etiqueta Sí/No',
+        texto_general: 'Texto disponible',
+        sin_datos: 'Sin datos suficientes'
+    };
+    const getMetodoLabel = (metodo) => metodoLabels[metodo] || 'Sin datos';
+    const resumenTopPresencia = (() => {
+        if (!Array.isArray(topCaracteristicas) || topCaracteristicas.length === 0) {
+            return '';
         }
-    } else {
-    }
-    
-    let html = '<div class="characteristics-grid">';
-    
-    // Velocidad de ventas
-    if (caracteristicas.velocidad_ventas) {
-        const v = caracteristicas.velocidad_ventas;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-tachometer-alt"></i> Velocidad de Ventas</strong>
-                <p><strong>Promedio:</strong> ${v.promedio.toFixed(2)} unidades/mes</p>
-                <p><strong>Mediana:</strong> ${v.mediana.toFixed(2)} unidades/mes</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${v.min.toFixed(2)} - ${v.max.toFixed(2)} unidades/mes
-                </p>
-                <p style="font-size: 0.85em; color: #888; margin-top: 0.5rem;">
-                    Percentil 25: ${v.percentil_25 ? v.percentil_25.toFixed(2) : 'N/A'} | 
-                    Percentil 75: ${v.percentil_75 ? v.percentil_75.toFixed(2) : 'N/A'}
-                </p>
-            </div>
-        `;
-    }
-    
-    // Meses para agotar
-    if (caracteristicas.meses_para_agotar) {
-        const m = caracteristicas.meses_para_agotar;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-clock"></i> Meses para Agotar</strong>
-                <p><strong>Promedio:</strong> ${m.promedio.toFixed(1)} meses</p>
-                <p><strong>Mediana:</strong> ${m.mediana.toFixed(1)} meses</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${m.min.toFixed(1)} - ${m.max.toFixed(1)} meses
-                </p>
-            </div>
-        `;
-    }
-    
-    // Porcentaje vendido
-    if (caracteristicas.porcentaje_vendido) {
-        const p = caracteristicas.porcentaje_vendido;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-percentage"></i> Porcentaje Vendido</strong>
-                <p><strong>Promedio:</strong> ${p.promedio.toFixed(1)}%</p>
-                <p><strong>Mediana:</strong> ${p.mediana.toFixed(1)}%</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${p.min.toFixed(1)}% - ${p.max.toFixed(1)}%
-                </p>
-            </div>
-        `;
-    }
-    
-    // Precio promedio
-    if (caracteristicas.precio_promedio) {
-        const pr = caracteristicas.precio_promedio;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-dollar-sign"></i> Precio Promedio</strong>
-                <p><strong>Promedio:</strong> ${formatCurrency(pr.promedio)}</p>
-                <p><strong>Mediana:</strong> ${formatCurrency(pr.mediana)}</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${formatCurrency(pr.min)} - ${formatCurrency(pr.max)}
-                </p>
-            </div>
-        `;
-    }
-    
-    // Área promedio
-    if (caracteristicas.area_promedio) {
-        const a = caracteristicas.area_promedio;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-ruler-combined"></i> Área Promedio</strong>
-                <p><strong>Promedio:</strong> ${a.promedio.toFixed(1)} m²</p>
-                <p><strong>Mediana:</strong> ${a.mediana.toFixed(1)} m²</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${a.min.toFixed(1)} - ${a.max.toFixed(1)} m²
-                </p>
-            </div>
-        `;
-    }
-    
-    // Precio por m²
-    if (caracteristicas.precio_m2) {
-        const pm2 = caracteristicas.precio_m2;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-calculator"></i> Precio por m²</strong>
-                <p><strong>Promedio:</strong> ${formatCurrency(pm2.promedio)}</p>
-                <p><strong>Mediana:</strong> ${formatCurrency(pm2.mediana)}</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${formatCurrency(pm2.min)} - ${formatCurrency(pm2.max)}
-                </p>
-            </div>
-        `;
-    }
-    
-    // Tamaño del proyecto
-    if (caracteristicas.tamano_proyecto) {
-        const t = caracteristicas.tamano_proyecto;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-building"></i> Tamaño del Proyecto</strong>
-                <p><strong>Promedio:</strong> ${t.promedio.toFixed(0)} unidades</p>
-                <p><strong>Mediana:</strong> ${t.mediana.toFixed(0)} unidades</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${t.min.toFixed(0)} - ${t.max.toFixed(0)} unidades
-                </p>
-            </div>
-        `;
-    }
-    
-    // Estrato
-    if (caracteristicas.estrato) {
-        const e = caracteristicas.estrato;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-layer-group"></i> Estrato</strong>
-                <p><strong>Moda:</strong> ${e.moda}</p>
-                <p><strong>Promedio:</strong> ${e.promedio.toFixed(1)}</p>
-                ${e.distribucion ? `<p style="font-size: 0.85em; color: #888; margin-top: 0.5rem;">
-                    <strong>Distribución:</strong> ${Object.entries(e.distribucion).map(([k, v]) => `Estrato ${k}: ${v} proyectos`).join(', ')}
-                </p>` : ''}
-            </div>
-        `;
-    }
-    
-    // Zona
-    if (caracteristicas.zona) {
-        const z = caracteristicas.zona;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-map-marked-alt"></i> Zona</strong>
-                <p><strong>Más común:</strong> ${z.mas_comun || 'N/A'}</p>
-                ${z.distribucion ? `<p style="font-size: 0.85em; color: #888; margin-top: 0.5rem;">
-                    <strong>Top zonas:</strong> ${Object.entries(z.distribucion).slice(0, 3).map(([k, v]) => `${k} (${v})`).join(', ')}
-                </p>` : ''}
-            </div>
-        `;
-    }
-    
-    // Alcobas promedio
-    if (caracteristicas.alcobas_promedio) {
-        const alc = caracteristicas.alcobas_promedio;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-bed"></i> Alcobas Promedio</strong>
-                <p><strong>Promedio:</strong> ${alc.promedio.toFixed(1)}</p>
-                <p><strong>Mediana:</strong> ${alc.mediana.toFixed(1)}</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${alc.min.toFixed(1)} - ${alc.max.toFixed(1)}
-                </p>
-            </div>
-        `;
-    }
-    
-    // Baños promedio
-    if (caracteristicas.banos_promedio) {
-        const ban = caracteristicas.banos_promedio;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-bath"></i> Baños Promedio</strong>
-                <p><strong>Promedio:</strong> ${ban.promedio.toFixed(1)}</p>
-                <p><strong>Mediana:</strong> ${ban.mediana.toFixed(1)}</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${ban.min.toFixed(1)} - ${ban.max.toFixed(1)}
-                </p>
-            </div>
-        `;
-    }
-    
-    // Garajes promedio
-    if (caracteristicas.garajes_promedio) {
-        const gar = caracteristicas.garajes_promedio;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-car"></i> Garajes Promedio</strong>
-                <p><strong>Promedio:</strong> ${gar.promedio.toFixed(1)}</p>
-                <p><strong>Mediana:</strong> ${gar.mediana.toFixed(1)}</p>
-                <p style="font-size: 0.9em; color: #666; margin-top: 0.5rem;">
-                    <strong>Rango:</strong> ${gar.min.toFixed(1)} - ${gar.max.toFixed(1)}
-                </p>
-            </div>
-        `;
-    }
-    
-    // Patrón de ventas
-    if (caracteristicas.patron_ventas) {
-        const pat = caracteristicas.patron_ventas;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-chart-line"></i> Patrón de Ventas</strong>
-                <p><strong>Más común:</strong> ${pat.mas_comun || 'N/A'}</p>
-                ${pat.distribucion ? `<p style="font-size: 0.85em; color: #888; margin-top: 0.5rem;">
-                    <strong>Distribución:</strong> ${Object.entries(pat.distribucion).map(([k, v]) => `${k}: ${v} proyectos`).join(', ')}
-                </p>` : ''}
-            </div>
-        `;
-    }
-    
-    // Tipo VIS
-    if (caracteristicas.tipo_vis) {
-        const vis = caracteristicas.tipo_vis;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-home"></i> Tipo VIS</strong>
-                <p><strong>Más común:</strong> ${vis.mas_comun || 'N/A'}</p>
-                ${vis.distribucion ? `<p style="font-size: 0.85em; color: #888; margin-top: 0.5rem;">
-                    <strong>Distribución:</strong> ${Object.entries(vis.distribucion).slice(0, 3).map(([k, v]) => `${k} (${v})`).join(', ')}
-                </p>` : ''}
-            </div>
-        `;
-    }
-    
-    // Ratio vendidas/disponibles
-    if (caracteristicas.ratio_vendidas_disponibles) {
-        const ratio = caracteristicas.ratio_vendidas_disponibles;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-balance-scale"></i> Ratio Vendidas/Disponibles</strong>
-                <p><strong>Promedio:</strong> ${ratio.promedio.toFixed(2)}</p>
-                <p><strong>Mediana:</strong> ${ratio.mediana.toFixed(2)}</p>
-            </div>
-        `;
-    }
-    
-    // Posición de precio
-    if (caracteristicas.posicion_precio_zona) {
-        const pos = caracteristicas.posicion_precio_zona;
-        html += `
-            <div class="characteristic-item">
-                <strong><i class="fas fa-chart-bar"></i> Posición de Precio (Zona)</strong>
-                <p><strong>Promedio:</strong> ${pos.promedio.toFixed(1)} percentil</p>
-                <p><strong>Mediana:</strong> ${pos.mediana.toFixed(1)} percentil</p>
-            </div>
-        `;
-    }
-    
-    html += '</div>'; // Cerrar grid
-    
-    // Amenidades (sección especial más grande)
-    // Verificar si hay amenidades disponibles (puede estar en diferentes estructuras)
-    let amenidades_data = null;
-    if (caracteristicas.amenidades) {
-        // Estructura 1: amenidades.amenidades_exitosos (estructura esperada)
-        if (caracteristicas.amenidades.amenidades_exitosos) {
-            amenidades_data = caracteristicas.amenidades.amenidades_exitosos;
+        const ordenadas = [...topCaracteristicas]
+            .filter(item => item?.estadisticas_presencia && item.estadisticas_presencia.porcentaje_presencia > 0)
+            .sort((a, b) => b.estadisticas_presencia.porcentaje_presencia - a.estadisticas_presencia.porcentaje_presencia)
+            .slice(0, 3);
+        if (!ordenadas.length) {
+            return '';
         }
-        // Estructura 2: amenidades directamente es un objeto con amenidades
-        else if (typeof caracteristicas.amenidades === 'object') {
-            // Verificar si tiene la estructura esperada
-            const keys = Object.keys(caracteristicas.amenidades);
-            if (keys.length > 0 && caracteristicas.amenidades[keys[0]] && typeof caracteristicas.amenidades[keys[0]] === 'object' && 'ratio' in caracteristicas.amenidades[keys[0]]) {
-                amenidades_data = caracteristicas.amenidades;
-            }
-        }
-    }
+        const promedioPresencia = ordenadas.reduce((acc, item) => acc + (item.estadisticas_presencia.porcentaje_presencia || 0), 0) / ordenadas.length;
+        const detalle = ordenadas.map(item => `
+            <div class="futuristic-summary-item">
+                <span class="summary-rank">${(item.estadisticas_presencia.porcentaje_presencia || 0).toFixed(1)}%</span>
+                <span class="summary-name">${escapeHtml(item.variable)}</span>
+            </div>
+        `).join('');
+        return `
+            <div class="futuristic-summary">
+                <div class="futuristic-summary-header">
+                    <i class="fas fa-lightbulb"></i>
+                    <div>
+                        <h4>Insights rápidos de presencia</h4>
+                        <p>Promedio del Top 3: ${promedioPresencia.toFixed(1)}% de los proyectos exitosos</p>
+                    </div>
+                </div>
+                <div class="futuristic-summary-body">
+                    ${detalle}
+                </div>
+            </div>
+        `;
+    })();
     
-    if (amenidades_data) {
-        html += `<div style="margin-top: 2rem; padding-top: 2rem; border-top: 2px solid #E8E8E8;">`;
-        html += `<h4 style="color: var(--platzi-dark-blue); margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.5rem;">`;
-        html += `<i class="fas fa-star"></i> Amenidades más Distintivas de Proyectos Exitosos`;
-        html += `</h4>`;
-        html += `<div class="characteristics-grid">`;
-        
-        try {
-            // Convertir a array de entradas y ordenar por ratio
-            const amenidades_entries = Object.entries(amenidades_data)
-                .map(([nombre, datos]) => {
-                    // Asegurar que datos tenga la estructura esperada
-                    if (typeof datos === 'object' && datos !== null) {
-                        return [nombre, {
-                            ratio: datos.ratio || 0,
-                            porcentaje_exitosos: datos.porcentaje_exitosos || 0,
-                            porcentaje_total: datos.porcentaje_total || 0,
-                            frecuencia_exitosos: datos.frecuencia_exitosos || 0,
-                            frecuencia_total: datos.frecuencia_total || 0
-                        }];
-                    }
-                    return null;
-                })
-                .filter(entry => entry !== null)
-                .sort((a, b) => (b[1].ratio || 0) - (a[1].ratio || 0))
-                .slice(0, 15);
+    // Diseño moderno y futurista
+    let html = `
+        <div class="futuristic-characteristics-container">
+            <!-- Header futurista -->
+            <div class="futuristic-header">
+                <div class="futuristic-title-wrapper">
+                    <div class="futuristic-icon-circle">
+                        <i class="fas fa-rocket"></i>
+                    </div>
+                    <div>
+                        <h2 class="futuristic-title">Características Comunes de Proyectos Exitosos</h2>
+                        <p class="futuristic-subtitle">Análisis basado en correlaciones y patrones de éxito</p>
+                    </div>
+                </div>
+            </div>
             
-            if (amenidades_entries.length > 0) {
-                amenidades_entries.forEach(([amenidad, datos]) => {
-                    const ratioColor = datos.ratio >= 1.5 ? '#27AE60' : datos.ratio >= 1.2 ? '#F39C12' : '#E74C3C';
-                    html += `
-                        <div class="characteristic-item" style="border-left-color: ${ratioColor};">
-                            <strong><i class="fas fa-check-circle"></i> ${escapeHtml(amenidad)}</strong>
-                            <p><strong>Ratio:</strong> <span style="color: ${ratioColor}; font-weight: 700;">${datos.ratio.toFixed(2)}x</span></p>
-                            <p><strong>En exitosos:</strong> ${datos.porcentaje_exitosos.toFixed(1)}%</p>
-                            <p><strong>En total:</strong> ${datos.porcentaje_total.toFixed(1)}%</p>
-                            <p style="font-size: 0.85em; color: #888; margin-top: 0.5rem;">
-                                ${datos.frecuencia_exitosos} de ${datos.frecuencia_total} proyectos
-                            </p>
+            <!-- Top características más fuertes del mapa de calor -->
+            ${topCaracteristicas.length > 0 ? `
+            <div class="futuristic-section">
+                <div class="futuristic-section-header">
+                    <i class="fas fa-chart-line"></i>
+                    <h3>Características con Mayor Impacto en el Éxito</h3>
+                    <span class="futuristic-badge">${topCaracteristicas.length} características</span>
+                </div>
+                ${resumenTopPresencia}
+                <div class="futuristic-grid top-characteristics-grid">
+                    ${topCaracteristicas.map((item, index) => {
+                        const corr = item.correlacion;
+                        const absCorr = item.abs_correlacion;
+                        const isPositive = corr > 0;
+                        const intensity = Math.min(absCorr * 100, 100);
+                        const rankColor = index === 0 ? '#F39C12' : index === 1 ? '#95A5A6' : index === 2 ? '#CD7F32' : 'rgba(45, 90, 160, 0.6)';
+                        const corrColor = isPositive ? '#E74C3C' : '#2D5AA0';
+                        const corrIcon = isPositive ? '↑' : '↓';
+                        
+                        // Estadísticas de presencia en proyectos exitosos
+                        const stats = item.estadisticas_presencia || {};
+                        const detalles = item.estadisticas_detalladas || {};
+                        const porcentajePresencia = stats.porcentaje_presencia || 0;
+                        const proyectosCon = stats.proyectos_con_caracteristica || 0;
+                        const totalProyectos = stats.total_proyectos || 0;
+                        const valoresValidos = stats.valores_validos || detalles.valores_validos || 0;
+                        const presenciaColor = porcentajePresencia >= 70 ? '#27AE60' : porcentajePresencia >= 50 ? '#F39C12' : '#E74C3C';
+                        const metodoLabel = getMetodoLabel(stats.metodo);
+                        
+                        let detalleHtml = '';
+                        if (detalles && detalles.tipo === 'numerica') {
+                            detalleHtml = `
+                                <div class="futuristic-analytics">
+                                    <div class="futuristic-analytics-title">
+                                        <i class="fas fa-wave-square"></i>
+                                        Estadística detallada
+                                    </div>
+                                    <div class="futuristic-analytics-grid">
+                                        <div class="analytics-item">
+                                            <span>Promedio</span>
+                                            <strong>${formatNumber(detalles.promedio)}</strong>
+                                        </div>
+                                        <div class="analytics-item">
+                                            <span>Mediana</span>
+                                            <strong>${formatNumber(detalles.mediana)}</strong>
+                                        </div>
+                                        <div class="analytics-item">
+                                            <span>P25 - P75</span>
+                                            <strong>${formatNumber(detalles.percentil_25)} - ${formatNumber(detalles.percentil_75)}</strong>
+                                        </div>
+                                        <div class="analytics-item">
+                                            <span>Mín / Máx</span>
+                                            <strong>${formatNumber(detalles.min)} - ${formatNumber(detalles.max)}</strong>
+                                        </div>
+                                    </div>
+                                    <div class="futuristic-analytics-foot">
+                                        Datos válidos: ${formatInteger(detalles.valores_validos || valoresValidos)}
+                                    </div>
+                                </div>
+                            `;
+                        } else if (detalles && detalles.tipo === 'categorica' && Array.isArray(detalles.top_valores)) {
+                            const chips = detalles.top_valores.map(val => `
+                                <div class="futuristic-category-chip">
+                                    <span class="chip-label">${escapeHtml(val.valor)}</span>
+                                    <span class="chip-value">${formatInteger(val.conteo)} (${formatNumber(val.porcentaje, 1)}%)</span>
+                                </div>
+                            `).join('');
+                            detalleHtml = `
+                                <div class="futuristic-analytics">
+                                    <div class="futuristic-analytics-title">
+                                        <i class="fas fa-layer-group"></i>
+                                        Distribución destacada
+                                    </div>
+                                    <div class="futuristic-category-list">
+                                        ${chips || '<span class="chip-empty">Sin datos relevantes</span>'}
+                                    </div>
+                                    <div class="futuristic-analytics-foot">
+                                        Valores distintos: ${formatInteger(detalles.valores_distintos || 0)}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        return `
+                            <div class="futuristic-card futuristic-card-compact" style="--intensity: ${intensity}%; --rank-color: ${rankColor}; --corr-color: ${corrColor};">
+                                <div class="futuristic-card-glow"></div>
+                                <div class="futuristic-card-content">
+                                    <div class="futuristic-rank-badge" style="background: ${rankColor};">
+                                        <span>${index + 1}</span>
+                                    </div>
+                                    <div class="futuristic-card-header">
+                                        <h4 class="futuristic-card-title">${escapeHtml(item.variable)}</h4>
+                                        <div class="futuristic-correlation-indicator" style="color: ${corrColor};">
+                                            <i class="fas fa-${isPositive ? 'arrow-up' : 'arrow-down'}"></i>
+                                            <span>${corrIcon} ${(absCorr * 100).toFixed(1)}%</span>
+                                        </div>
+                                    </div>
+                                    <div class="futuristic-card-body">
+                                        <!-- Estadística de presencia en proyectos exitosos -->
+                                        <div class="futuristic-presence-section">
+                                            <div class="futuristic-presence-header">
+                                                <i class="fas fa-chart-pie"></i>
+                                                <span class="futuristic-presence-label">Presencia en Proyectos Exitosos</span>
+                                            </div>
+                                            <div class="futuristic-presence-value" style="color: ${presenciaColor};">
+                                                ${porcentajePresencia.toFixed(1)}%
+                                            </div>
+                                            <div class="futuristic-presence-detail">
+                                                ${proyectosCon} de ${totalProyectos} proyectos
+                                            </div>
+                                            <div class="futuristic-presence-meta">
+                                                <span>${metodoLabel}</span>
+                                                <span>Datos válidos: ${formatInteger(valoresValidos)}</span>
+                                            </div>
+                                            <div class="futuristic-presence-progress">
+                                                <div class="futuristic-presence-progress-fill" style="width: ${porcentajePresencia}%; background: linear-gradient(90deg, ${presenciaColor} 0%, ${presenciaColor}dd 100%);"></div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Barra de correlación -->
+                                        <div class="futuristic-progress-bar">
+                                            <div class="futuristic-progress-fill" style="width: ${intensity}%; background: linear-gradient(90deg, ${corrColor} 0%, ${corrColor}dd 100%);"></div>
+                                        </div>
+                                        
+                                        <div class="futuristic-card-stats">
+                                            <div class="futuristic-stat">
+                                                <span class="futuristic-stat-label">Correlación</span>
+                                                <span class="futuristic-stat-value" style="color: ${corrColor};">
+                                                    ${corr > 0 ? '+' : ''}${corr.toFixed(3)}
+                                                </span>
+                                            </div>
+                                            <div class="futuristic-stat">
+                                                <span class="futuristic-stat-label">Tipo</span>
+                                                <span class="futuristic-stat-value">${isPositive ? 'Positiva' : 'Negativa'}</span>
+                                            </div>
+                                        </div>
+                                        
+                                        ${detalleHtml}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+            ` : ''}
+            
+            <!-- Características tradicionales -->
+            <div class="futuristic-section">
+                <div class="futuristic-section-header">
+                    <i class="fas fa-chart-bar"></i>
+                    <h3>Métricas de Rendimiento</h3>
+                </div>
+                <div class="futuristic-metrics-grid">
+                    ${(() => {
+                        let metricsHtml = '';
+                        
+                        // Velocidad de ventas
+                        if (caracteristicas.velocidad_ventas) {
+                            const v = caracteristicas.velocidad_ventas;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-tachometer-alt"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Velocidad de Ventas</h4>
+                                        <div class="futuristic-metric-value">${v.promedio.toFixed(2)}</div>
+                                        <div class="futuristic-metric-unit">unidades/mes</div>
+                                        <div class="futuristic-metric-range">Rango: ${v.min.toFixed(2)} - ${v.max.toFixed(2)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Meses para agotar
+                        if (caracteristicas.meses_para_agotar) {
+                            const m = caracteristicas.meses_para_agotar;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-clock"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Meses para Agotar</h4>
+                                        <div class="futuristic-metric-value">${m.promedio.toFixed(1)}</div>
+                                        <div class="futuristic-metric-unit">meses</div>
+                                        <div class="futuristic-metric-range">Rango: ${m.min.toFixed(1)} - ${m.max.toFixed(1)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Porcentaje vendido
+                        if (caracteristicas.porcentaje_vendido) {
+                            const p = caracteristicas.porcentaje_vendido;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-percentage"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Porcentaje Vendido</h4>
+                                        <div class="futuristic-metric-value">${p.promedio.toFixed(1)}%</div>
+                                        <div class="futuristic-metric-range">Rango: ${p.min.toFixed(1)}% - ${p.max.toFixed(1)}%</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Precio promedio
+                        if (caracteristicas.precio_promedio) {
+                            const pr = caracteristicas.precio_promedio;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-dollar-sign"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Precio Promedio</h4>
+                                        <div class="futuristic-metric-value">${formatCurrency(pr.promedio)}</div>
+                                        <div class="futuristic-metric-range">Rango: ${formatCurrency(pr.min)} - ${formatCurrency(pr.max)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Área promedio
+                        if (caracteristicas.area_promedio) {
+                            const a = caracteristicas.area_promedio;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-ruler-combined"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Área Promedio</h4>
+                                        <div class="futuristic-metric-value">${a.promedio.toFixed(1)}</div>
+                                        <div class="futuristic-metric-unit">m²</div>
+                                        <div class="futuristic-metric-range">Rango: ${a.min.toFixed(1)} - ${a.max.toFixed(1)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Precio por m²
+                        if (caracteristicas.precio_m2) {
+                            const pm2 = caracteristicas.precio_m2;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-calculator"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Precio por m²</h4>
+                                        <div class="futuristic-metric-value">${formatCurrency(pm2.promedio)}</div>
+                                        <div class="futuristic-metric-range">Rango: ${formatCurrency(pm2.min)} - ${formatCurrency(pm2.max)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Tamaño del proyecto
+                        if (caracteristicas.tamano_proyecto) {
+                            const t = caracteristicas.tamano_proyecto;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-building"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Tamaño del Proyecto</h4>
+                                        <div class="futuristic-metric-value">${t.promedio.toFixed(0)}</div>
+                                        <div class="futuristic-metric-unit">unidades</div>
+                                        <div class="futuristic-metric-range">Rango: ${t.min.toFixed(0)} - ${t.max.toFixed(0)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Alcobas promedio
+                        if (caracteristicas.alcobas_promedio) {
+                            const alc = caracteristicas.alcobas_promedio;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-bed"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Alcobas Promedio</h4>
+                                        <div class="futuristic-metric-value">${alc.promedio.toFixed(1)}</div>
+                                        <div class="futuristic-metric-unit">alcobas</div>
+                                        <div class="futuristic-metric-range">Rango: ${alc.min.toFixed(1)} - ${alc.max.toFixed(1)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Baños promedio
+                        if (caracteristicas.banos_promedio) {
+                            const ban = caracteristicas.banos_promedio;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-bath"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Baños Promedio</h4>
+                                        <div class="futuristic-metric-value">${ban.promedio.toFixed(1)}</div>
+                                        <div class="futuristic-metric-unit">baños</div>
+                                        <div class="futuristic-metric-range">Rango: ${ban.min.toFixed(1)} - ${ban.max.toFixed(1)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Garajes/Parqueaderos promedio
+                        if (caracteristicas.garajes_promedio) {
+                            const gar = caracteristicas.garajes_promedio;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-car"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Parqueaderos Promedio</h4>
+                                        <div class="futuristic-metric-value">${gar.promedio.toFixed(1)}</div>
+                                        <div class="futuristic-metric-unit">parqueaderos</div>
+                                        <div class="futuristic-metric-range">Rango: ${gar.min.toFixed(1)} - ${gar.max.toFixed(1)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Ratio vendidas/disponibles
+                        if (caracteristicas.ratio_vendidas_disponibles) {
+                            const ratio = caracteristicas.ratio_vendidas_disponibles;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-balance-scale"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Ratio Vendidas/Disponibles</h4>
+                                        <div class="futuristic-metric-value">${ratio.promedio.toFixed(2)}</div>
+                                        <div class="futuristic-metric-range">Mediana: ${ratio.mediana.toFixed(2)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Posición de precio
+                        if (caracteristicas.posicion_precio_zona) {
+                            const pos = caracteristicas.posicion_precio_zona;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-chart-bar"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Posición de Precio</h4>
+                                        <div class="futuristic-metric-value">${pos.promedio.toFixed(1)}</div>
+                                        <div class="futuristic-metric-unit">percentil</div>
+                                        <div class="futuristic-metric-range">Mediana: ${pos.mediana.toFixed(1)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // Estrato
+                        if (caracteristicas.estrato) {
+                            const e = caracteristicas.estrato;
+                            metricsHtml += `
+                                <div class="futuristic-metric-card">
+                                    <div class="futuristic-metric-icon"><i class="fas fa-layer-group"></i></div>
+                                    <div class="futuristic-metric-content">
+                                        <h4>Estrato</h4>
+                                        <div class="futuristic-metric-value">${e.moda || e.promedio.toFixed(1)}</div>
+                                        <div class="futuristic-metric-unit">${e.moda ? 'moda' : 'promedio'}</div>
+                                        ${e.promedio ? `<div class="futuristic-metric-range">Promedio: ${e.promedio.toFixed(1)}</div>` : ''}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        return metricsHtml;
+                    })()}
+                </div>
+            </div>
+            
+            <!-- Amenidades -->
+            ${(() => {
+                // Verificar si hay amenidades disponibles
+                let amenidades_data = null;
+                if (caracteristicas.amenidades) {
+                    if (caracteristicas.amenidades.amenidades_exitosos) {
+                        amenidades_data = caracteristicas.amenidades.amenidades_exitosos;
+                    } else if (typeof caracteristicas.amenidades === 'object') {
+                        const keys = Object.keys(caracteristicas.amenidades);
+                        if (keys.length > 0 && caracteristicas.amenidades[keys[0]] && typeof caracteristicas.amenidades[keys[0]] === 'object' && 'ratio' in caracteristicas.amenidades[keys[0]]) {
+                            amenidades_data = caracteristicas.amenidades;
+                        }
+                    }
+                }
+                
+                if (!amenidades_data) {
+                    return `
+                        <div class="futuristic-section">
+                            <div class="futuristic-section-header">
+                                <i class="fas fa-star"></i>
+                                <h3>Amenidades más Distintivas</h3>
+                            </div>
+                            <div class="futuristic-empty-state">
+                                <i class="fas fa-info-circle"></i>
+                                <p>No hay datos de amenidades disponibles. Verifica que la columna "Otros" esté presente en los datos.</p>
+                            </div>
                         </div>
                     `;
-                });
-            } else {
-                html += `<div class="characteristic-item"><p>No se encontraron amenidades con datos suficientes.</p></div>`;
-            }
-        } catch (error) {
-            console.error('Error al procesar amenidades:', error);
-            html += `<div class="characteristic-item"><p>Error al cargar amenidades. Ver consola para más detalles.</p></div>`;
-        }
-        
-        html += `</div></div>`;
-    } else {
-        // Si no hay amenidades, mostrar mensaje informativo
-        html += `<div style="margin-top: 2rem; padding-top: 2rem; border-top: 2px solid #E8E8E8;">`;
-        html += `<h4 style="color: var(--platzi-dark-blue); margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.5rem;">`;
-        html += `<i class="fas fa-star"></i> Amenidades más Distintivas de Proyectos Exitosos`;
-        html += `</h4>`;
-        html += `<div class="characteristic-item"><p style="color: #888; font-style: italic;">No hay datos de amenidades disponibles. Verifica que la columna "Otros" esté presente en los datos.</p></div>`;
-        html += `</div>`;
-    }
+                }
+                
+                let amenidadesHtml = `
+                    <div class="futuristic-section">
+                        <div class="futuristic-section-header">
+                            <i class="fas fa-star"></i>
+                            <h3>Amenidades más Distintivas</h3>
+                        </div>
+                        <div class="futuristic-amenities-grid">
+                `;
+                
+                try {
+                    const amenidades_entries = Object.entries(amenidades_data)
+                        .map(([nombre, datos]) => {
+                            if (typeof datos === 'object' && datos !== null) {
+                                return [nombre, {
+                                    ratio: datos.ratio || 0,
+                                    porcentaje_exitosos: datos.porcentaje_exitosos || 0,
+                                    porcentaje_total: datos.porcentaje_total || 0,
+                                    frecuencia_exitosos: datos.frecuencia_exitosos || 0,
+                                    frecuencia_total: datos.frecuencia_total || 0
+                                }];
+                            }
+                            return null;
+                        })
+                        .filter(entry => entry !== null)
+                        .sort((a, b) => (b[1].ratio || 0) - (a[1].ratio || 0))
+                        .slice(0, 15);
+                    
+                    if (amenidades_entries.length > 0) {
+                        amenidades_entries.forEach(([amenidad, datos]) => {
+                            const ratioColor = datos.ratio >= 1.5 ? '#27AE60' : datos.ratio >= 1.2 ? '#F39C12' : '#E74C3C';
+                            const ratioIntensity = Math.min((datos.ratio / 2) * 100, 100);
+                            amenidadesHtml += `
+                                <div class="futuristic-amenity-card" style="--ratio-color: ${ratioColor}; --ratio-intensity: ${ratioIntensity}%;">
+                                    <div class="futuristic-amenity-glow"></div>
+                                    <div class="futuristic-amenity-content">
+                                        <div class="futuristic-amenity-icon" style="background: ${ratioColor}22;">
+                                            <i class="fas fa-check-circle" style="color: ${ratioColor};"></i>
+                                        </div>
+                                        <h4 class="futuristic-amenity-name">${escapeHtml(amenidad)}</h4>
+                                        <div class="futuristic-amenity-ratio" style="color: ${ratioColor};">
+                                            <span class="futuristic-ratio-value">${datos.ratio.toFixed(2)}x</span>
+                                            <span class="futuristic-ratio-label">Ratio de Éxito</span>
+                                        </div>
+                                        <div class="futuristic-amenity-stats">
+                                            <div class="futuristic-amenity-stat">
+                                                <span>En Exitosos</span>
+                                                <strong>${datos.porcentaje_exitosos.toFixed(1)}%</strong>
+                                            </div>
+                                            <div class="futuristic-amenity-stat">
+                                                <span>En Total</span>
+                                                <strong>${datos.porcentaje_total.toFixed(1)}%</strong>
+                                            </div>
+                                        </div>
+                                        <div class="futuristic-amenity-progress">
+                                            <div class="futuristic-amenity-progress-fill" style="width: ${ratioIntensity}%; background: ${ratioColor};"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                    } else {
+                        amenidadesHtml += `<div class="futuristic-empty-state"><p>No se encontraron amenidades con datos suficientes.</p></div>`;
+                    }
+                } catch (error) {
+                    console.error('Error al procesar amenidades:', error);
+                    amenidadesHtml += `<div class="futuristic-empty-state"><p>Error al cargar amenidades. Ver consola para más detalles.</p></div>`;
+                }
+                
+                amenidadesHtml += `</div></div>`;
+                return amenidadesHtml;
+            })()}
+        </div>`;
     
     container.innerHTML = html;
+    
+    // Cargar correlaciones después de un pequeño delay para asegurar que el DOM esté listo
+    setTimeout(() => {
+        console.log('[mostrarCaracteristicasExitosos] Cargando correlaciones...');
+        cargarCorrelacionesExito();
+    }, 100);
 }
 
 // Formatear moneda
@@ -2293,32 +2678,8 @@ async function updateStats() {
             if (moderadosEl) moderadosEl.textContent = moderados;
             if (mejorablesEl) mejorablesEl.textContent = mejorables;
             
-            // Actualizar gráfico de barras
-            if (total > 0) {
-                const exitososPct = (exitosos / total * 100).toFixed(1);
-                const moderadosPct = (moderados / total * 100).toFixed(1);
-                const mejorablesPct = (mejorables / total * 100).toFixed(1);
-                
-                const chartExitosos = document.getElementById('chart-exitosos');
-                const chartModerados = document.getElementById('chart-moderados');
-                const chartMejorables = document.getElementById('chart-mejorables');
-                const chartExitososValue = document.getElementById('chart-exitosos-value');
-                const chartModeradosValue = document.getElementById('chart-moderados-value');
-                const chartMejorablesValue = document.getElementById('chart-mejorables-value');
-                
-                if (chartExitosos) {
-                    chartExitosos.style.width = exitososPct + '%';
-                    if (chartExitososValue) chartExitososValue.textContent = exitososPct + '%';
-                }
-                if (chartModerados) {
-                    chartModerados.style.width = moderadosPct + '%';
-                    if (chartModeradosValue) chartModeradosValue.textContent = moderadosPct + '%';
-                }
-                if (chartMejorables) {
-                    chartMejorables.style.width = mejorablesPct + '%';
-                    if (chartMejorablesValue) chartMejorablesValue.textContent = mejorablesPct + '%';
-                }
-            }
+            // Actualizar gráfico circular (pie chart)
+            updatePieChart();
             
             // Actualizar panel de estadísticas de categorías
             updateCategoryStatsPanel();
@@ -2904,6 +3265,7 @@ function setupMapControls() {
             // Actualizar panel de categorías y estadísticas
             updateMarkerLegend();
             updateCategoryStatsPanel();
+            updatePieChart(); // Actualizar gráfico circular cuando cambia el criterio
             saveMapState();
         });
     }
@@ -2925,6 +3287,102 @@ function setupMapControls() {
             fitToData();
         }
     });
+    
+    // Botón para limpiar todos los filtros (excepto Estado del Proyecto)
+    const clearFiltersBtn = document.getElementById('clear-filters-btn');
+    if (clearFiltersBtn) {
+        clearFiltersBtn.addEventListener('click', function() {
+            clearAllFilters();
+        });
+        
+        clearFiltersBtn.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                clearAllFilters();
+            }
+        });
+    }
+}
+
+// Función para limpiar todos los filtros excepto "Estado del Proyecto"
+function clearAllFilters() {
+    // Guardar el estado actual del filtro "Estado del Proyecto"
+    const estadoActual = currentFilters.estado || 'Activos';
+    
+    // Restablecer todos los filtros a valores por defecto (excepto estado)
+    currentFilters = {
+        clasificacion: 'Todos',
+        zona: 'Todas',
+        barrio: 'Todos',
+        tipo_vis: 'Todos',
+        estado: estadoActual, // Mantener el estado actual
+        precio_min: null,
+        precio_max: null
+    };
+    
+    // Limpiar los selects del panel de filtros
+    const clasificacionSelect = document.getElementById('clasificacion');
+    const zonaSelect = document.getElementById('zona');
+    const barrioSelect = document.getElementById('barrio');
+    const tipoVisSelect = document.getElementById('tipo_vis');
+    
+    if (clasificacionSelect) clasificacionSelect.value = 'Todos';
+    if (zonaSelect) zonaSelect.value = 'Todas';
+    if (barrioSelect) barrioSelect.value = 'Todos';
+    if (tipoVisSelect) tipoVisSelect.value = 'Todos';
+    
+    // Limpiar los campos de precio
+    const precioMinInput = document.getElementById('precio_min');
+    const precioMaxInput = document.getElementById('precio_max');
+    
+    if (precioMinInput) precioMinInput.value = '';
+    if (precioMaxInput) precioMaxInput.value = '';
+    
+    // Limpiar selecciones de categorías
+    selectedCategories.clear();
+    
+    // Limpiar selecciones de constructores
+    if (typeof selectedConstructors !== 'undefined') {
+        selectedConstructors.clear();
+    }
+    
+    // Actualizar información de rango de precio
+    if (typeof updatePriceRangeInfo === 'function') {
+        updatePriceRangeInfo();
+    }
+    
+    // Recargar proyectos con los filtros limpiados
+    loadProyectos();
+    
+    // Actualizar el mapa y las vistas
+    updateMap();
+    updateTable();
+    updateStats();
+    
+    // Actualizar panel de categorías y estadísticas
+    if (typeof updateMarkerLegend === 'function') {
+        updateMarkerLegend();
+    }
+    if (typeof updateCategoryStatsPanel === 'function') {
+        updateCategoryStatsPanel();
+    }
+    
+    // Actualizar estados visuales de constructores
+    if (typeof updateConstructorItemsState === 'function') {
+        updateConstructorItemsState();
+    }
+    
+    // Actualizar estados visuales de categorías
+    if (typeof updateCategoryStatsItemsState === 'function') {
+        updateCategoryStatsItemsState();
+    }
+    
+    // Centrar el mapa en los datos
+    if (typeof fitToData === 'function') {
+        fitToData();
+    }
+    
+    console.log('[clearAllFilters] Todos los filtros han sido limpiados (excepto Estado del Proyecto:', estadoActual + ')');
 }
 
 // Cambiar estilo base del mapa
@@ -3392,7 +3850,7 @@ function updateMarkerLegend() {
     
     if (!sourceData || sourceData.length === 0) {
         if (categoriesList) {
-            categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay datos disponibles</p></div>';
+        categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay datos disponibles</p></div>';
         }
         // Limpiar allCategories si no hay datos
         allCategories = [];
@@ -3526,90 +3984,93 @@ function updateMarkerLegend() {
     
     // Solo actualizar el HTML de la lista si el panel está visible (no es "clasificacion")
     if (categoriesList && markerColorCriterion !== 'clasificacion') {
-        // Generar HTML de las categorías
-        if (categoriasArray.length === 0) {
-            categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay categorías disponibles</p></div>';
-            updateCategoriesCount();
+    // Generar HTML de las categorías
+    if (categoriasArray.length === 0) {
+        categoriesList.innerHTML = '<div class="categories-loading"><i class="fas fa-exclamation-circle"></i><p>No hay categorías disponibles</p></div>';
+        updateCategoriesCount();
             // Aún así, actualizar el panel de estadísticas
             updateCategoryStatsPanel();
-            return;
-        }
-        
-        // Filtrar por búsqueda
-        const searchInput = document.getElementById('categories-search');
-        const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
-        const filteredCategories = categoriasArray.filter(cat => {
-            if (!searchQuery) return true;
-            return cat.nombre.toLowerCase().includes(searchQuery);
-        });
-        
-        let html = '';
-        filteredCategories.forEach(cat => {
-            const isSelected = selectedCategories.has(cat.id); // Selección múltiple
-            html += `
-                <div class="categories-item ${isSelected ? 'selected' : ''}" data-category-id="${cat.id}">
-                    <input type="checkbox" id="cat-${cat.id}" ${isSelected ? 'checked' : ''} data-category-id="${cat.id}">
-                    <label for="cat-${cat.id}" class="categories-item-checkbox"></label>
-                    <span class="categories-item-color" style="background-color: ${cat.color};"></span>
-                    <div class="categories-item-info">
-                        <div class="categories-item-name">${escapeHtml(cat.nombre)}</div>
-                        <div class="categories-item-count">${cat.count} proyecto${cat.count !== 1 ? 's' : ''}</div>
-                    </div>
+        return;
+    }
+    
+    // Filtrar por búsqueda
+    const searchInput = document.getElementById('categories-search');
+    const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    const filteredCategories = categoriasArray.filter(cat => {
+        if (!searchQuery) return true;
+        return cat.nombre.toLowerCase().includes(searchQuery);
+    });
+    
+    let html = '';
+    filteredCategories.forEach(cat => {
+        const isSelected = selectedCategories.has(cat.id); // Selección múltiple
+        html += `
+            <div class="categories-item ${isSelected ? 'selected' : ''}" data-category-id="${cat.id}">
+                <input type="checkbox" id="cat-${cat.id}" ${isSelected ? 'checked' : ''} data-category-id="${cat.id}">
+                <label for="cat-${cat.id}" class="categories-item-checkbox"></label>
+                <span class="categories-item-color" style="background-color: ${cat.color};"></span>
+                <div class="categories-item-info">
+                    <div class="categories-item-name">${escapeHtml(cat.nombre)}</div>
+                    <div class="categories-item-count">${cat.count} proyecto${cat.count !== 1 ? 's' : ''}</div>
                 </div>
-            `;
+            </div>
+        `;
+    });
+    
+    if (filteredCategories.length === 0) {
+        html = '<div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div>';
+    }
+    
+    categoriesList.innerHTML = html;
+    
+    // Agregar event listeners a los checkboxes (selección múltiple)
+    categoriesList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const categoryId = this.getAttribute('data-category-id');
+            const item = this.closest('.categories-item');
+            
+            if (this.checked) {
+                // Agregar a la selección
+                selectedCategories.add(categoryId);
+                if (item) item.classList.add('selected');
+            } else {
+                // Remover de la selección
+                selectedCategories.delete(categoryId);
+                if (item) item.classList.remove('selected');
+            }
+            
+            // Actualizar filtro
+            if (selectedCategories.size === 0) {
+                showAllCategories();
+            } else {
+                filterBySelectedCategories();
+            }
+            
+            updateCategoriesCount();
         });
-        
-        if (filteredCategories.length === 0) {
-            html = '<div class="categories-loading"><i class="fas fa-search"></i><p>No se encontraron categorías</p></div>';
-        }
-        
-        categoriesList.innerHTML = html;
-        
-        // Agregar event listeners a los checkboxes (selección múltiple)
-        categoriesList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-            checkbox.addEventListener('change', function() {
-                const categoryId = this.getAttribute('data-category-id');
-                const item = this.closest('.categories-item');
-                
-                if (this.checked) {
-                    // Agregar a la selección
-                    selectedCategories.add(categoryId);
-                    if (item) item.classList.add('selected');
-                } else {
-                    // Remover de la selección
-                    selectedCategories.delete(categoryId);
-                    if (item) item.classList.remove('selected');
+    });
+    
+    // Agregar event listener al item completo (click en cualquier parte)
+    categoriesList.querySelectorAll('.categories-item').forEach(item => {
+        item.addEventListener('click', function(e) {
+            if (e.target.type !== 'checkbox' && e.target.tagName !== 'LABEL') {
+                const checkbox = this.querySelector('input[type="checkbox"]');
+                if (checkbox) {
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event('change'));
                 }
-                
-                // Actualizar filtro
-                if (selectedCategories.size === 0) {
-                    showAllCategories();
-                } else {
-                    filterBySelectedCategories();
-                }
-                
-                updateCategoriesCount();
-            });
+            }
         });
-        
-        // Agregar event listener al item completo (click en cualquier parte)
-        categoriesList.querySelectorAll('.categories-item').forEach(item => {
-            item.addEventListener('click', function(e) {
-                if (e.target.type !== 'checkbox' && e.target.tagName !== 'LABEL') {
-                    const checkbox = this.querySelector('input[type="checkbox"]');
-                    if (checkbox) {
-                        checkbox.checked = !checkbox.checked;
-                        checkbox.dispatchEvent(new Event('change'));
-                    }
-                }
-            });
-        });
-        
-        updateCategoriesCount();
+    });
+    
+    updateCategoriesCount();
     }
     
     // Actualizar panel de estadísticas con información de categorías
     updateCategoryStatsPanel();
+    
+    // Actualizar gráfico circular después de actualizar las categorías
+    updatePieChart();
 }
 
 // Variables globales para búsqueda y ordenamiento de categorías
@@ -3848,6 +4309,7 @@ function updateCategoryStatsPanel() {
                         // Solo actualizar estados visuales (NO regenerar HTML - todas las filas permanecen visibles)
                         updateCategoryStatsItemsState();
                         updateCategoriesCount();
+                        updatePieChart(); // Actualizar gráfico circular cuando se selecciona/deselecciona una categoría
                     }
                 }
             });
@@ -3855,6 +4317,9 @@ function updateCategoryStatsPanel() {
         
         // Actualizar estados visuales después de renderizar
         updateCategoryStatsItemsState();
+        
+        // Actualizar gráfico circular después de actualizar el panel
+        updatePieChart();
         
         // Configurar event listeners para búsqueda y ordenamiento
         setupCategoryStatsControls();
@@ -3912,6 +4377,35 @@ function setupCategoryStatsControls() {
     }
 }
 
+// Mostrar todas las categorías (restaurar vista completa)
+function showAllCategories() {
+    // Limpiar la selección
+    selectedCategories.clear();
+    
+    // Restaurar datos originales si existen
+    if (proyectosDataOriginal.length > 0) {
+        proyectosData = [...proyectosDataOriginal];
+    }
+    
+    // Actualizar vistas
+    updateMap();
+    
+    // Restaurar vista completa del mapa (centrar en todos los proyectos)
+    if (proyectosData.length > 0) {
+        fitToData();
+    }
+    
+    updateTable();
+    updateStats();
+    updateCategoriesCount();
+    
+    // Actualizar estados visuales de los items (remover resaltado)
+    updateCategoryStatsItemsState();
+    
+    // Actualizar gráfico circular
+    updatePieChart();
+}
+
 // Filtrar mapa por categorías seleccionadas (selección múltiple)
 function filterBySelectedCategories() {
     if (selectedCategories.size === 0) {
@@ -3967,6 +4461,9 @@ function filterBySelectedCategories() {
     // NO llamar a updateCategoryStatsPanel() aquí para evitar regenerar el HTML
     // Solo actualizar las clases CSS de las filas existentes
     updateCategoryStatsItemsState();
+    
+    // Actualizar gráfico circular cuando se filtran categorías
+    updatePieChart();
 }
 
 // Alias para compatibilidad (ahora filterBySelectedCategories es la función principal)
@@ -3974,6 +4471,259 @@ function filterBySelectedCategory() {
     filterBySelectedCategories();
 }
 
+
+// Función para actualizar el gráfico circular (pie chart) - Innovador y llamativo con interacción Power BI
+function updatePieChart() {
+    const canvas = document.getElementById('pie-chart-canvas');
+    const chartTitle = document.getElementById('pie-chart-title');
+    const legendContainer = document.getElementById('pie-chart-legend');
+    
+    if (!canvas) return;
+    
+    // Actualizar título según el criterio de "Color por"
+    const titulos = {
+        'clasificacion': 'Distribución por Clasificación',
+        'vende': 'Distribución por Vendedor',
+        'zona': 'Distribución por Zona',
+        'barrio': 'Distribución por Barrio',
+        'estrato': 'Distribución por Estrato',
+        'tipo_vis': 'Distribución por Tipo VIS'
+    };
+    if (chartTitle) {
+        chartTitle.textContent = titulos[markerColorCriterion] || 'Distribución por Categoría';
+    }
+    
+    // Obtener datos de categorías según el criterio actual
+    if (!allCategories || allCategories.length === 0) {
+        // Si no hay categorías, mostrar gráfico vacío
+        if (pieChart) {
+            pieChart.destroy();
+            pieChart = null;
+        }
+        if (legendContainer) {
+            legendContainer.innerHTML = '<div class="pie-chart-empty"><i class="fas fa-chart-pie"></i><p>Cargando datos...</p></div>';
+        }
+        return;
+    }
+    
+    // Preparar datos para el gráfico
+    const chartData = allCategories.map(cat => ({
+        label: cat.nombre,
+        value: cat.count,
+        color: cat.color,
+        id: cat.id,
+        isSelected: selectedCategories.has(cat.id)
+    })).filter(cat => cat.value > 0); // Solo mostrar categorías con datos
+    
+    if (chartData.length === 0) {
+        if (pieChart) {
+            pieChart.destroy();
+            pieChart = null;
+        }
+        if (legendContainer) {
+            legendContainer.innerHTML = '<div class="pie-chart-empty"><i class="fas fa-chart-pie"></i><p>No hay datos disponibles</p></div>';
+        }
+        return;
+    }
+    
+    // Calcular total para porcentajes
+    const total = chartData.reduce((sum, cat) => sum + cat.value, 0);
+    
+    // Preparar datos para Chart.js
+    const labels = chartData.map(cat => cat.label);
+    const data = chartData.map(cat => cat.value);
+    const backgroundColors = chartData.map(cat => {
+        // Si está seleccionada, usar color brillante; si no, usar color más opaco
+        if (cat.isSelected) {
+            return cat.color;
+        } else if (selectedCategories.size > 0) {
+            // Si hay selecciones pero esta no está seleccionada, usar color muy opaco para mayor contraste
+            return hexToRgba(cat.color, 0.15);
+        } else {
+            return cat.color;
+        }
+    });
+    const borderColors = chartData.map(cat => cat.color);
+    const borderWidths = chartData.map(cat => cat.isSelected ? 3 : 1);
+    
+    // Destruir gráfico anterior si existe
+    if (pieChart) {
+        pieChart.destroy();
+    }
+    
+    // Crear nuevo gráfico circular con estilo innovador y llamativo
+    const ctx = canvas.getContext('2d');
+    pieChart = new Chart(ctx, {
+        type: 'doughnut', // Usar doughnut para un efecto más moderno
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: backgroundColors,
+                borderColor: borderColors,
+                borderWidth: borderWidths,
+                hoverBorderWidth: 4,
+                hoverOffset: 8 // Efecto de "salto" al hacer hover
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 1.2,
+            plugins: {
+                legend: {
+                    display: false // Usaremos leyenda personalizada
+                },
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleFont: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        size: 13
+                    },
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed || 0;
+                            const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                            return `${label}: ${value} proyectos (${percentage}%)`;
+                        }
+                    }
+                }
+            },
+            animation: {
+                animateRotate: true,
+                animateScale: true,
+                duration: 1000,
+                easing: 'easeOutQuart'
+            },
+            interaction: {
+                intersect: false,
+                mode: 'nearest'
+            },
+            onHover: (event, activeElements) => {
+                canvas.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
+            },
+            onClick: (event, activeElements) => {
+                if (activeElements.length > 0) {
+                    const index = activeElements[0].index;
+                    const categoryId = chartData[index].id;
+                    const categoryName = chartData[index].label;
+                    
+                    // Detectar si se presionó Ctrl (o Cmd en Mac) para selección múltiple
+                    // Chart.js pasa el evento nativo en event.nativeEvent o event.originalEvent
+                    const nativeEvent = event.nativeEvent || event.originalEvent || event;
+                    const isCtrlPressed = nativeEvent.ctrlKey || nativeEvent.metaKey;
+                    const wasSelected = selectedCategories.has(categoryId);
+                    
+                    if (isCtrlPressed) {
+                        // Selección múltiple: toggle de esta categoría sin afectar las demás
+                        if (wasSelected) {
+                            // Deseleccionar esta categoría
+                            selectedCategories.delete(categoryId);
+                        } else {
+                            // Agregar a la selección
+                            selectedCategories.add(categoryId);
+                        }
+                        
+                        // Actualizar filtro con todas las categorías seleccionadas
+                        if (selectedCategories.size === 0) {
+                            showAllCategories();
+                        } else {
+                            filterBySelectedCategories();
+                        }
+                        
+                        // Actualizar estados visuales
+                        updateCategoryStatsItemsState();
+                        updateCategoriesCount();
+                        updatePieChart(); // Re-renderizar con nuevos colores
+                    } else {
+                        // Sin Ctrl: selección única (reemplazar selección anterior)
+                        if (wasSelected && selectedCategories.size === 1) {
+                            // Si solo esta estaba seleccionada, deseleccionar todo
+                            selectedCategories.clear();
+                            showAllCategories();
+                        } else {
+                            // Limpiar selección anterior y seleccionar solo esta
+                            selectedCategories.clear();
+                            selectedCategories.add(categoryId);
+                            
+                            // Filtrar para mostrar solo los proyectos de esta categoría
+                            filterBySelectedCategories();
+                            
+                            // Actualizar estados visuales
+                            updateCategoryStatsItemsState();
+                            updateCategoriesCount();
+                            updatePieChart(); // Re-renderizar con nuevos colores
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // Crear leyenda personalizada interactiva
+    if (legendContainer) {
+        let legendHtml = '<div class="pie-legend-items">';
+        chartData.forEach((cat, index) => {
+            const percentage = total > 0 ? ((cat.value / total) * 100).toFixed(1) : 0;
+            const isSelected = cat.isSelected;
+            const opacity = (selectedCategories.size > 0 && !isSelected) ? 0.25 : 1;
+            legendHtml += `
+                <div class="pie-legend-item ${isSelected ? 'selected' : ''}" 
+                     data-category-id="${cat.id}" 
+                     style="opacity: ${opacity}; cursor: pointer;"
+                     title="Click para ${isSelected ? 'deseleccionar' : 'seleccionar'}">
+                    <div class="pie-legend-color" style="background-color: ${cat.color}; border: 2px solid ${isSelected ? '#2d5aa0' : 'transparent'};"></div>
+                    <div class="pie-legend-info">
+                        <span class="pie-legend-label">${escapeHtml(cat.label)}</span>
+                        <span class="pie-legend-value">${cat.value} (${percentage}%)</span>
+                    </div>
+                </div>
+            `;
+        });
+        legendHtml += '</div>';
+        legendContainer.innerHTML = legendHtml;
+        
+        // Agregar event listeners a los items de la leyenda
+        legendContainer.querySelectorAll('.pie-legend-item').forEach(item => {
+            item.addEventListener('click', function() {
+                const categoryId = this.getAttribute('data-category-id');
+                const wasSelected = selectedCategories.has(categoryId);
+                
+                if (wasSelected) {
+                    selectedCategories.delete(categoryId);
+                } else {
+                    selectedCategories.add(categoryId);
+                }
+                
+                // Actualizar filtros y vistas
+                if (selectedCategories.size === 0) {
+                    showAllCategories();
+                } else {
+                    filterBySelectedCategories();
+                }
+                
+                // Actualizar estados visuales
+                updateCategoryStatsItemsState();
+                updateCategoriesCount();
+                updatePieChart(); // Re-renderizar con nuevos colores
+            });
+        });
+    }
+}
+
+// Función auxiliar para convertir hex a rgba
+function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 // Actualizar estados visuales de los items de categorías (estilo Power BI - transparencia)
 function updateCategoryStatsItemsState() {
@@ -4049,63 +4799,7 @@ function updateCategoriesCount() {
     }
 }
 
-// Configurar toggle de vista compacta/completa de la tabla
-function setupCategoryTableToggle() {
-    const toggleBtn = document.getElementById('category-table-toggle');
-    const toggleIcon = document.getElementById('category-table-toggle-icon');
-    const table = document.querySelector('.category-stats-table');
-    
-    if (!toggleBtn) return;
-    
-    // Si la tabla aún no existe, esperar a que se cree
-    if (!table) {
-        setTimeout(setupCategoryTableToggle, 100);
-        return;
-    }
-    
-    // Cargar estado desde localStorage (por defecto: compacto)
-    const savedMode = localStorage.getItem('categoryTableMode') || 'compact';
-    if (savedMode === 'full') {
-        table.classList.remove('compact');
-        table.classList.add('full');
-        if (toggleIcon) {
-            toggleIcon.classList.remove('fa-compress-alt');
-            toggleIcon.classList.add('fa-expand-alt');
-        }
-    } else {
-        table.classList.remove('full');
-        table.classList.add('compact');
-        if (toggleIcon) {
-            toggleIcon.classList.remove('fa-expand-alt');
-            toggleIcon.classList.add('fa-compress-alt');
-        }
-    }
-    
-    // Event listener para toggle
-    toggleBtn.addEventListener('click', function() {
-        const isCompact = table.classList.contains('compact');
-        
-        if (isCompact) {
-            // Cambiar a modo completo
-            table.classList.remove('compact');
-            table.classList.add('full');
-            if (toggleIcon) {
-                toggleIcon.classList.remove('fa-compress-alt');
-                toggleIcon.classList.add('fa-expand-alt');
-            }
-            localStorage.setItem('categoryTableMode', 'full');
-        } else {
-            // Cambiar a modo compacto
-            table.classList.remove('full');
-            table.classList.add('compact');
-            if (toggleIcon) {
-                toggleIcon.classList.remove('fa-expand-alt');
-                toggleIcon.classList.add('fa-compress-alt');
-            }
-            localStorage.setItem('categoryTableMode', 'compact');
-        }
-    });
-}
+// Función eliminada: setupCategoryTableToggle() - El botón de alternar vista fue removido según solicitud del usuario
 
 // Configurar panel de categorías (ahora en el sidebar)
 function setupCategoriesPanel() {
@@ -4263,4 +4957,1022 @@ function applyCategoryFilters() {
 function setupMarkerLegendToggle() {
     // Ahora usamos setupCategoriesPanel
     setupCategoriesPanel();
+}
+
+// Variable global para el mapa de calor de características
+let characteristicsHeatmapChart = null;
+
+// Función para transformar variables categóricas a numéricas
+function transformarCategoricasANumericas(caracteristicas) {
+    const datosTransformados = {};
+    
+    // Función helper para normalizar valores numéricos (0-1)
+    function normalizar(valor, min, max) {
+        if (max === min || isNaN(valor) || isNaN(min) || isNaN(max)) return 0.5;
+        return Math.max(0, Math.min(1, (valor - min) / (max - min)));
+    }
+    
+    // Función helper para codificar distribuciones categóricas
+    function codificarDistribucion(distribucion) {
+        if (!distribucion || typeof distribucion !== 'object') return 0;
+        const valores = Object.values(distribucion);
+        if (valores.length === 0) return 0;
+        const maxValor = Math.max(...valores);
+        const total = valores.reduce((sum, v) => sum + v, 0);
+        return total > 0 ? maxValor / total : 0;
+    }
+    
+    // Función helper para codificar valores categóricos únicos
+    function codificarCategorico(valor, opciones) {
+        if (!opciones || opciones.length === 0) return 0.5;
+        const index = opciones.indexOf(valor);
+        return index >= 0 ? (index + 1) / opciones.length : 0.5;
+    }
+    
+    // Procesar todas las características disponibles
+    if (caracteristicas.velocidad_ventas) {
+        const v = caracteristicas.velocidad_ventas;
+        datosTransformados['Velocidad Ventas'] = {
+            promedio: normalizar(v.promedio, v.min, v.max),
+            mediana: normalizar(v.mediana, v.min, v.max),
+            percentil_25: v.percentil_25 ? normalizar(v.percentil_25, v.min, v.max) : null,
+            percentil_75: v.percentil_75 ? normalizar(v.percentil_75, v.min, v.max) : null
+        };
+    }
+    
+    if (caracteristicas.meses_para_agotar) {
+        const m = caracteristicas.meses_para_agotar;
+        datosTransformados['Meses para Agotar'] = {
+            promedio: 1 - normalizar(m.promedio, m.min, m.max),
+            mediana: 1 - normalizar(m.mediana, m.min, m.max)
+        };
+    }
+    
+    if (caracteristicas.porcentaje_vendido) {
+        const p = caracteristicas.porcentaje_vendido;
+        datosTransformados['% Vendido'] = {
+            promedio: normalizar(p.promedio, p.min, p.max),
+            mediana: normalizar(p.mediana, p.min, p.max)
+        };
+    }
+    
+    if (caracteristicas.precio_promedio) {
+        const pr = caracteristicas.precio_promedio;
+        datosTransformados['Precio Promedio'] = {
+            promedio: normalizar(pr.promedio, pr.min, pr.max),
+            mediana: normalizar(pr.mediana, pr.min, pr.max)
+        };
+    }
+    
+    if (caracteristicas.area_promedio) {
+        const a = caracteristicas.area_promedio;
+        datosTransformados['Área Promedio'] = {
+            promedio: normalizar(a.promedio, a.min, a.max),
+            mediana: normalizar(a.mediana, a.min, a.max)
+        };
+    }
+    
+    if (caracteristicas.precio_m2) {
+        const pm2 = caracteristicas.precio_m2;
+        datosTransformados['Precio/m²'] = {
+            promedio: normalizar(pm2.promedio, pm2.min, pm2.max),
+            mediana: normalizar(pm2.mediana, pm2.min, pm2.max)
+        };
+    }
+    
+    if (caracteristicas.tamano_proyecto) {
+        const t = caracteristicas.tamano_proyecto;
+        datosTransformados['Tamaño Proyecto'] = {
+            promedio: normalizar(t.promedio, t.min, t.max),
+            mediana: normalizar(t.mediana, t.min, t.max)
+        };
+    }
+    
+    if (caracteristicas.estrato && caracteristicas.estrato.distribucion) {
+        const e = caracteristicas.estrato;
+        const estratos = Object.keys(e.distribucion).map(Number).filter(n => !isNaN(n)).sort((a, b) => a - b);
+        if (estratos.length > 0) {
+            datosTransformados['Estrato'] = {
+                moda: codificarCategorico(e.moda, estratos),
+                promedio: normalizar(e.promedio, Math.min(...estratos), Math.max(...estratos)),
+                distribucion: codificarDistribucion(e.distribucion)
+            };
+        }
+    }
+    
+    if (caracteristicas.zona && caracteristicas.zona.distribucion) {
+        const z = caracteristicas.zona;
+        const zonas = Object.keys(z.distribucion);
+        if (zonas.length > 0) {
+            datosTransformados['Zona'] = {
+                mas_comun: codificarCategorico(z.mas_comun, zonas),
+                distribucion: codificarDistribucion(z.distribucion)
+            };
+        }
+    }
+    
+    if (caracteristicas.alcobas_promedio) {
+        const alc = caracteristicas.alcobas_promedio;
+        datosTransformados['Alcobas Promedio'] = {
+            promedio: normalizar(alc.promedio, alc.min, alc.max),
+            mediana: normalizar(alc.mediana, alc.min, alc.max)
+        };
+    }
+    
+    if (caracteristicas.banos_promedio) {
+        const ban = caracteristicas.banos_promedio;
+        datosTransformados['Baños Promedio'] = {
+            promedio: normalizar(ban.promedio, ban.min, ban.max),
+            mediana: normalizar(ban.mediana, ban.min, ban.max)
+        };
+    }
+    
+    if (caracteristicas.garajes_promedio) {
+        const gar = caracteristicas.garajes_promedio;
+        datosTransformados['Garajes Promedio'] = {
+            promedio: normalizar(gar.promedio, gar.min, gar.max),
+            mediana: normalizar(gar.mediana, gar.min, gar.max)
+        };
+    }
+    
+    if (caracteristicas.patron_ventas) {
+        const pat = caracteristicas.patron_ventas;
+        const patrones = ['Desacelerado', 'Constante', 'Acelerado'];
+        datosTransformados['Patrón Ventas'] = {
+            mas_comun: codificarCategorico(pat.mas_comun, patrones),
+            distribucion: codificarDistribucion(pat.distribucion)
+        };
+    }
+    
+    if (caracteristicas.tipo_vis && caracteristicas.tipo_vis.distribucion) {
+        const vis = caracteristicas.tipo_vis;
+        const tipos = Object.keys(vis.distribucion);
+        if (tipos.length > 0) {
+            datosTransformados['Tipo VIS'] = {
+                mas_comun: codificarCategorico(vis.mas_comun, tipos),
+                distribucion: codificarDistribucion(vis.distribucion)
+            };
+        }
+    }
+    
+    if (caracteristicas.ratio_vendidas_disponibles) {
+        const ratio = caracteristicas.ratio_vendidas_disponibles;
+        datosTransformados['Ratio Vend/Dispon'] = {
+            promedio: normalizar(ratio.promedio, ratio.min, ratio.max),
+            mediana: normalizar(ratio.mediana, ratio.min, ratio.max)
+        };
+    }
+    
+    if (caracteristicas.posicion_precio_zona) {
+        const pos = caracteristicas.posicion_precio_zona;
+        datosTransformados['Posición Precio'] = {
+            promedio: 1 - normalizar(pos.promedio, 0, 100),
+            mediana: 1 - normalizar(pos.mediana, 0, 100)
+        };
+    }
+    
+    // Amenidades
+    if (caracteristicas.amenidades) {
+        let amenidades_data = caracteristicas.amenidades.amenidades_exitosos || 
+            (typeof caracteristicas.amenidades === 'object' && Object.keys(caracteristicas.amenidades).length > 0 ? caracteristicas.amenidades : null);
+        
+        if (amenidades_data) {
+            const amenidades_entries = Object.entries(amenidades_data)
+                .map(([nombre, datos]) => ({
+                    nombre,
+                    ratio: datos.ratio || 0,
+                    porcentaje: datos.porcentaje_exitosos || 0
+                }))
+                .filter(a => a.ratio > 0)
+                .sort((a, b) => b.ratio - a.ratio)
+                .slice(0, 10);
+            
+            if (amenidades_entries.length > 0) {
+                const maxRatio = Math.max(...amenidades_entries.map(a => a.ratio));
+                const minRatio = Math.min(...amenidades_entries.map(a => a.ratio));
+                
+                amenidades_entries.forEach(({nombre, ratio, porcentaje}) => {
+                    datosTransformados[`Amenidad: ${nombre}`] = {
+                        ratio: normalizar(ratio, minRatio, maxRatio),
+                        porcentaje: normalizar(porcentaje, 0, 100)
+                    };
+                });
+            }
+        }
+    }
+    
+    return datosTransformados;
+}
+
+// Función para generar el mapa de calor usando Canvas HTML5
+function generarHeatmapCaracteristicas(caracteristicas) {
+    const container = document.getElementById('heatmap-container');
+    const canvas = document.getElementById('characteristics-heatmap');
+    const legendInfo = document.getElementById('heatmap-legend-info');
+    
+    if (!container || !canvas) return;
+    
+    const datosTransformados = transformarCategoricasANumericas(caracteristicas);
+    
+    if (Object.keys(datosTransformados).length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    const caracteristicasList = Object.keys(datosTransformados);
+    const metricasList = ['promedio', 'mediana', 'percentil_25', 'percentil_75', 'min', 'max', 'moda', 'distribucion', 'mas_comun', 'ratio', 'porcentaje'];
+    
+    const metricasDisponibles = new Set();
+    caracteristicasList.forEach(caracteristica => {
+        Object.keys(datosTransformados[caracteristica]).forEach(metrica => {
+            if (metricasList.includes(metrica) && datosTransformados[caracteristica][metrica] !== null && datosTransformados[caracteristica][metrica] !== undefined) {
+                metricasDisponibles.add(metrica);
+            }
+        });
+    });
+    
+    const metricasArray = Array.from(metricasDisponibles);
+    
+    if (metricasArray.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    const dataMatrix = caracteristicasList.map(caracteristica => {
+        return metricasArray.map(metrica => {
+            const valor = datosTransformados[caracteristica][metrica];
+            return valor !== undefined && valor !== null && !isNaN(valor) ? valor : null;
+        });
+    });
+    
+    const caracteristicasValidas = [];
+    const dataMatrixValida = [];
+    caracteristicasList.forEach((caracteristica, i) => {
+        if (dataMatrix[i].some(v => v !== null)) {
+            caracteristicasValidas.push(caracteristica);
+            dataMatrixValida.push(dataMatrix[i]);
+        }
+    });
+    
+    if (caracteristicasValidas.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    const labelsY = caracteristicasValidas;
+    const labelsX = metricasArray.map(m => {
+        const nombres = {
+            'promedio': 'Promedio', 'mediana': 'Mediana', 'percentil_25': 'P25', 'percentil_75': 'P75',
+            'min': 'Mínimo', 'max': 'Máximo', 'moda': 'Moda', 'distribucion': 'Distribución',
+            'mas_comun': 'Más Común', 'ratio': 'Ratio', 'porcentaje': 'Porcentaje'
+        };
+        return nombres[m] || m;
+    });
+    
+    const allValues = dataMatrixValida.flat().filter(v => v !== null);
+    if (allValues.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    const minValue = Math.min(...allValues);
+    const maxValue = Math.max(...allValues);
+    
+    const ctx = canvas.getContext('2d');
+    const padding = { top: 60, right: 20, bottom: 80, left: 200 };
+    const cellPadding = 2;
+    const cellWidth = 80;
+    const cellHeight = 35;
+    const canvasWidth = padding.left + (labelsX.length * cellWidth) + padding.right;
+    const canvasHeight = padding.top + (labelsY.length * cellHeight) + padding.bottom;
+    
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    
+    function getColorForValue(value) {
+        if (value === null || isNaN(value)) return 'rgba(200, 200, 200, 0.3)';
+        const normalized = (value - minValue) / (maxValue - minValue);
+        
+        if (normalized < 0.33) {
+            const t = normalized / 0.33;
+            return `rgba(${Math.round(45 + t * (39 - 45))}, ${Math.round(90 + t * (174 - 90))}, ${Math.round(160 + t * (96 - 160))}, 0.85)`;
+        } else if (normalized < 0.67) {
+            const t = (normalized - 0.33) / 0.34;
+            return `rgba(${Math.round(39 + t * (243 - 39))}, ${Math.round(174 + t * (156 - 174))}, ${Math.round(96 + t * (18 - 96))}, 0.85)`;
+        } else {
+            const t = (normalized - 0.67) / 0.33;
+            return `rgba(${Math.round(243 + t * (231 - 243))}, ${Math.round(156 + t * (76 - 156))}, ${Math.round(18 + t * (60 - 18))}, 0.85)`;
+        }
+    }
+    
+    dataMatrixValida.forEach((row, i) => {
+        row.forEach((value, j) => {
+            const x = padding.left + (j * cellWidth);
+            const y = padding.top + (i * cellHeight);
+            
+            ctx.fillStyle = getColorForValue(value);
+            ctx.fillRect(x + cellPadding, y + cellPadding, cellWidth - (cellPadding * 2), cellHeight - (cellPadding * 2));
+            
+            ctx.strokeStyle = value !== null ? (value > (minValue + maxValue) / 2 ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.2)') : 'rgba(200, 200, 200, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x + cellPadding, y + cellPadding, cellWidth - (cellPadding * 2), cellHeight - (cellPadding * 2));
+            
+            if (value !== null) {
+                ctx.fillStyle = value > (minValue + maxValue) / 2 ? 'rgba(255, 255, 255, 0.95)' : 'rgba(0, 0, 0, 0.8)';
+                ctx.font = 'bold 10px "Segoe UI", Tahoma, Geneva, Verdana, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(value.toFixed(2), x + cellWidth / 2, y + cellHeight / 2);
+            }
+        });
+    });
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.font = '11px "Segoe UI", Tahoma, Geneva, Verdana, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    labelsX.forEach((label, j) => {
+        const x = padding.left + (j * cellWidth) + (cellWidth / 2);
+        ctx.save();
+        ctx.translate(x, padding.top - 10);
+        ctx.rotate(-Math.PI / 4);
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+    });
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.font = '10px "Segoe UI", Tahoma, Geneva, Verdana, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    labelsY.forEach((label, i) => {
+        const y = padding.top + (i * cellHeight) + (cellHeight / 2);
+        const truncatedLabel = label.length > 20 ? label.substring(0, 17) + '...' : label;
+        ctx.fillText(truncatedLabel, padding.left - 10, y);
+    });
+    
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+    ctx.lineWidth = 1;
+    
+    for (let j = 0; j <= labelsX.length; j++) {
+        const x = padding.left + (j * cellWidth);
+        ctx.beginPath();
+        ctx.moveTo(x, padding.top);
+        ctx.lineTo(x, padding.top + (labelsY.length * cellHeight));
+        ctx.stroke();
+    }
+    
+    for (let i = 0; i <= labelsY.length; i++) {
+        const y = padding.top + (i * cellHeight);
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(padding.left + (labelsX.length * cellWidth), y);
+        ctx.stroke();
+    }
+    
+    container.style.display = 'block';
+    
+    if (legendInfo) {
+        let legendHtml = '<div class="heatmap-legend">';
+        legendHtml += '<div class="legend-title"><strong>Escala de Valores Normalizados (0.0 - 1.0):</strong></div>';
+        legendHtml += '<div class="legend-gradient">';
+        
+        const steps = 20;
+        for (let i = 0; i <= steps; i++) {
+            const normalized = i / steps;
+            const value = minValue + (normalized * (maxValue - minValue));
+            let color;
+            if (normalized < 0.33) {
+                const t = normalized / 0.33;
+                color = `rgb(${Math.round(45 + t * (39 - 45))}, ${Math.round(90 + t * (174 - 90))}, ${Math.round(160 + t * (96 - 160))})`;
+            } else if (normalized < 0.67) {
+                const t = (normalized - 0.33) / 0.34;
+                color = `rgb(${Math.round(39 + t * (243 - 39))}, ${Math.round(174 + t * (156 - 174))}, ${Math.round(96 + t * (18 - 96))})`;
+            } else {
+                const t = (normalized - 0.67) / 0.33;
+                color = `rgb(${Math.round(243 + t * (231 - 243))}, ${Math.round(156 + t * (76 - 156))}, ${Math.round(18 + t * (60 - 18))})`;
+            }
+            legendHtml += `<div class="legend-step" style="background-color: ${color};" title="${value.toFixed(3)}"></div>`;
+        }
+        legendHtml += '</div>';
+        legendHtml += '<div class="legend-labels">';
+        legendHtml += `<span>${minValue.toFixed(2)}</span><span>${maxValue.toFixed(2)}</span>`;
+        legendHtml += '</div>';
+        legendHtml += '</div>';
+        
+        legendInfo.innerHTML = legendHtml;
+    }
+    
+    canvas.addEventListener('mousemove', function(e) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        if (x >= padding.left && x <= padding.left + (labelsX.length * cellWidth) &&
+            y >= padding.top && y <= padding.top + (labelsY.length * cellHeight)) {
+            
+            const col = Math.floor((x - padding.left) / cellWidth);
+            const row = Math.floor((y - padding.top) / cellHeight);
+            
+            if (col >= 0 && col < labelsX.length && row >= 0 && row < labelsY.length) {
+                const value = dataMatrixValida[row][col];
+                canvas.title = value !== null ? 
+                    `${labelsY[row]}: ${labelsX[col]} = ${value.toFixed(3)}` : 
+                    `${labelsY[row]}: ${labelsX[col]} = N/A`;
+                canvas.style.cursor = 'pointer';
+            } else {
+                canvas.title = '';
+                canvas.style.cursor = 'default';
+            }
+        } else {
+            canvas.title = '';
+            canvas.style.cursor = 'default';
+        }
+    });
+}
+
+// Función para cargar y mostrar mapa de calor de correlaciones con éxito
+async function cargarCorrelacionesExito() {
+    console.log('[cargarCorrelacionesExito] Iniciando carga de correlaciones...');
+    const container = document.getElementById('correlation-heatmap-container');
+    
+    if (!container) {
+        console.error('[cargarCorrelacionesExito] No se encontró el contenedor correlation-heatmap-container');
+        return;
+    }
+    
+    try {
+        console.log('[cargarCorrelacionesExito] Haciendo fetch a /api/correlaciones-exito...');
+        const response = await fetch('/api/correlaciones-exito');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('[cargarCorrelacionesExito] Datos recibidos:', data);
+        
+        if (data.success && data.matriz && data.variables) {
+            console.log('[cargarCorrelacionesExito] Datos válidos, generando heatmap...');
+            generarHeatmapCorrelaciones(data);
+        } else {
+            console.warn('[cargarCorrelacionesExito] No se pudieron cargar las correlaciones:', data.error || 'Error desconocido');
+            console.warn('[cargarCorrelacionesExito] data.success:', data.success);
+            console.warn('[cargarCorrelacionesExito] data.matriz:', data.matriz);
+            console.warn('[cargarCorrelacionesExito] data.variables:', data.variables);
+            container.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('[cargarCorrelacionesExito] Error al cargar correlaciones:', error);
+        console.error('[cargarCorrelacionesExito] Stack:', error.stack);
+        container.style.display = 'none';
+    }
+}
+
+// Función para generar el mapa de calor de correlaciones
+function generarHeatmapCorrelaciones(data) {
+    console.log('[generarHeatmapCorrelaciones] Iniciando generación de heatmap...');
+    const container = document.getElementById('correlation-heatmap-container');
+    const canvas = document.getElementById('correlation-heatmap');
+    const legendInfo = document.getElementById('correlation-heatmap-legend-info');
+    
+    if (!container) {
+        console.error('[generarHeatmapCorrelaciones] No se encontró el contenedor');
+        return;
+    }
+    
+    if (!canvas) {
+        console.error('[generarHeatmapCorrelaciones] No se encontró el canvas');
+        return;
+    }
+    
+    console.log('[generarHeatmapCorrelaciones] Elementos encontrados, procesando datos...');
+    
+    const { variables, matriz, correlaciones_exito, info_variables } = data;
+    
+    if (!variables || !matriz || variables.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    // Función para limpiar nombres de variables (remover sufijo _num si existe)
+    function limpiarNombreVariable(nombre) {
+        if (nombre.endsWith('_num')) {
+            return nombre.replace('_num', '');
+        }
+        return nombre;
+    }
+    
+    // Crear un mapa de nombres limpios para las variables
+    const nombresLimpios = variables.map(v => limpiarNombreVariable(v));
+    
+    // Configurar canvas con mejor resolución y diseño moderno
+    const ctx = canvas.getContext('2d');
+    const padding = { top: 100, right: 40, bottom: 120, left: 300 };
+    const cellPadding = 0; // Sin padding para eliminar líneas blancas
+    
+    // Calcular dimensiones mejoradas (celdas más grandes para mejor legibilidad)
+    const cellWidth = 85;
+    const cellHeight = 40;
+    const canvasWidth = padding.left + (variables.length * cellWidth) + padding.right;
+    const canvasHeight = padding.top + (variables.length * cellHeight) + padding.bottom;
+    
+    // Aumentar resolución para mejor calidad
+    const scale = window.devicePixelRatio || 2;
+    canvas.width = canvasWidth * scale;
+    canvas.height = canvasHeight * scale;
+    canvas.style.width = canvasWidth + 'px';
+    canvas.style.height = canvasHeight + 'px';
+    ctx.scale(scale, scale);
+    
+    // Fondo con gradiente moderno
+    const gradient = ctx.createLinearGradient(0, 0, canvasWidth, canvasHeight);
+    gradient.addColorStop(0, '#f8f9fa');
+    gradient.addColorStop(1, '#ffffff');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    
+    // Agregar sombra sutil al canvas
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 5;
+    
+    // Función mejorada para obtener color según valor de correlación (-1 a 1)
+    // Escala más detallada y precisa
+    function getColorForCorrelation(value) {
+        if (value === null || isNaN(value)) return 'rgba(220, 220, 220, 0.4)';
+        
+        // Normalizar a 0-1 donde 0 = -1, 0.5 = 0, 1 = 1
+        const normalized = (value + 1) / 2;
+        const absValue = Math.abs(value);
+        
+        // Escala de colores mejorada con más detalle:
+        // Azul oscuro (correlación negativa fuerte) -> Azul claro -> Blanco -> Amarillo claro -> Rojo (correlación positiva fuerte)
+        
+        if (normalized < 0.5) {
+            // Correlación negativa: Azul oscuro -> Azul medio -> Azul claro -> Blanco
+            const t = normalized / 0.5; // 0 a 1
+            
+            if (t < 0.33) {
+                // Azul oscuro a azul medio (correlación negativa muy fuerte: -1.0 a -0.33)
+                const t2 = t / 0.33;
+                const r = Math.round(30 + t2 * (60 - 30));
+                const g = Math.round(60 + t2 * (100 - 60));
+                const b = Math.round(120 + t2 * (180 - 120));
+                return `rgba(${r}, ${g}, ${b}, ${0.7 + absValue * 0.25})`;
+            } else if (t < 0.67) {
+                // Azul medio a azul claro (correlación negativa moderada: -0.33 a -0.0)
+                const t2 = (t - 0.33) / 0.34;
+                const r = Math.round(60 + t2 * (150 - 60));
+                const g = Math.round(100 + t2 * (200 - 100));
+                const b = Math.round(180 + t2 * (230 - 180));
+                return `rgba(${r}, ${g}, ${b}, ${0.6 + absValue * 0.2})`;
+            } else {
+                // Azul claro a blanco (correlación negativa débil: -0.0 a 0.0)
+                const t2 = (t - 0.67) / 0.33;
+                const r = Math.round(150 + t2 * (240 - 150));
+                const g = Math.round(200 + t2 * (245 - 200));
+                const b = Math.round(230 + t2 * (250 - 230));
+                return `rgba(${r}, ${g}, ${b}, ${0.5 + absValue * 0.15})`;
+            }
+        } else {
+            // Correlación positiva: Blanco -> Amarillo claro -> Naranja -> Rojo
+            const t = (normalized - 0.5) / 0.5; // 0 a 1
+            
+            if (t < 0.33) {
+                // Blanco a amarillo claro (correlación positiva débil: 0.0 a 0.33)
+                const t2 = t / 0.33;
+                const r = Math.round(240 + t2 * (255 - 240));
+                const g = Math.round(245 + t2 * (240 - 245));
+                const b = Math.round(250 - t2 * (200 - 50));
+                return `rgba(${r}, ${g}, ${b}, ${0.5 + absValue * 0.15})`;
+            } else if (t < 0.67) {
+                // Amarillo a naranja (correlación positiva moderada: 0.33 a 0.67)
+                const t2 = (t - 0.33) / 0.34;
+                const r = Math.round(255);
+                const g = Math.round(240 - t2 * (180 - 100));
+                const b = Math.round(50 - t2 * 30);
+                return `rgba(${r}, ${g}, ${b}, ${0.65 + absValue * 0.2})`;
+            } else {
+                // Naranja a rojo (correlación positiva fuerte: 0.67 a 1.0)
+                const t2 = (t - 0.67) / 0.33;
+                const r = Math.round(255);
+                const g = Math.round(100 - t2 * (100 - 30));
+                const b = Math.round(20 - t2 * 20);
+                return `rgba(${r}, ${g}, ${b}, ${0.75 + absValue * 0.2})`;
+            }
+        }
+    }
+    
+    // Dibujar celdas del heatmap con diseño moderno y sofisticado
+    matriz.forEach((row, i) => {
+        row.forEach((value, j) => {
+            const x = padding.left + (j * cellWidth);
+            const y = padding.top + (i * cellHeight);
+            const absValue = Math.abs(value);
+            
+            // Resetear sombras
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            
+            // Para la diagonal (auto-correlación = 1.0), usar color especial
+            if (i === j) {
+                // Auto-correlación siempre es 1.0
+                ctx.fillStyle = 'rgba(45, 90, 160, 0.9)';
+                ctx.shadowColor = 'rgba(45, 90, 160, 0.3)';
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+            } else {
+                // Color de fondo con gradiente mejorado
+                ctx.fillStyle = getColorForCorrelation(value);
+                
+                // Sombra sutil para profundidad en correlaciones significativas
+                if (absValue > 0.2) {
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.12)';
+                    ctx.shadowBlur = 6;
+                    ctx.shadowOffsetX = 2;
+                    ctx.shadowOffsetY = 2;
+                }
+            }
+            
+            // Dibujar celda sin bordes redondeados ni padding para análisis visual continuo
+            const rectX = x;
+            const rectY = y;
+            const rectW = cellWidth;
+            const rectH = cellHeight;
+            
+            // Dibujar rectángulo simple sin bordes redondeados para análisis visual continuo
+            ctx.fillRect(rectX, rectY, rectW, rectH);
+            
+            // Resetear sombra
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            
+            // Solo dibujar borde sutil para la diagonal (auto-correlación)
+            // No dibujar bordes en otras celdas para análisis visual continuo
+            if (i === j) {
+                // Diagonal: borde dorado especial muy sutil
+                ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(rectX, rectY, rectW, rectH);
+            }
+            
+            // Texto del valor mejorado
+            if (value !== null && !isNaN(value)) {
+                // Color del texto según fondo e intensidad
+                let textColor;
+                if (i === j) {
+                    textColor = 'rgba(255, 255, 255, 0.98)';
+                } else {
+                    const isLight = absValue < 0.2 || (value > 0 && value < 0.3);
+                    textColor = isLight ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.98)';
+                }
+                ctx.fillStyle = textColor;
+                
+                // Fuente mejorada con mejor legibilidad
+                const fontSize = absValue > 0.5 || i === j ? 12 : absValue > 0.3 ? 11 : 10;
+                ctx.font = `${absValue > 0.5 || i === j ? 'bold ' : ''}${fontSize}px "Segoe UI", -apple-system, BlinkMacSystemFont, "Roboto", "Helvetica Neue", Arial, sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                // Sombra de texto para mejor legibilidad
+                if (absValue > 0.2 || i === j) {
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+                    ctx.shadowBlur = 3;
+                    ctx.shadowOffsetX = 1;
+                    ctx.shadowOffsetY = 1;
+                }
+                
+                // Mostrar valor con formato mejorado
+                const displayValue = i === j ? '1.00' : value.toFixed(2);
+                ctx.fillText(displayValue, x + cellWidth / 2, y + cellHeight / 2);
+                
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+            }
+        });
+    });
+    
+    // Agregar método roundRect si no existe (para bordes redondeados)
+    if (!ctx.roundRect) {
+        CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radius) {
+            this.beginPath();
+            this.moveTo(x + radius, y);
+            this.lineTo(x + width - radius, y);
+            this.quadraticCurveTo(x + width, y, x + width, y + radius);
+            this.lineTo(x + width, y + height - radius);
+            this.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            this.lineTo(x + radius, y + height);
+            this.quadraticCurveTo(x, y + height, x, y + height - radius);
+            this.lineTo(x, y + radius);
+            this.quadraticCurveTo(x, y, x + radius, y);
+            this.closePath();
+        };
+    }
+    
+    // Dibujar labels del eje X (arriba) mejorados con mejor legibilidad
+    ctx.fillStyle = 'rgba(45, 90, 160, 0.9)';
+    ctx.font = 'bold 12px "Segoe UI", -apple-system, BlinkMacSystemFont, "Roboto", "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    variables.forEach((label, j) => {
+        const x = padding.left + (j * cellWidth) + (cellWidth / 2);
+        ctx.save();
+        ctx.translate(x, padding.top - 20);
+        ctx.rotate(-Math.PI / 4);
+        const nombreLimpio = nombresLimpios[j];
+        const truncatedLabel = nombreLimpio.length > 25 ? nombreLimpio.substring(0, 22) + '...' : nombreLimpio;
+        // Sombra de texto para mejor legibilidad
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 1;
+        ctx.shadowOffsetY = 1;
+        ctx.fillText(truncatedLabel, 0, 0);
+        ctx.restore();
+    });
+    
+    // Dibujar labels del eje Y (izquierda) mejorados con mejor legibilidad
+    ctx.fillStyle = 'rgba(45, 90, 160, 0.9)';
+    ctx.font = 'bold 12px "Segoe UI", -apple-system, BlinkMacSystemFont, "Roboto", "Helvetica Neue", Arial, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    variables.forEach((label, i) => {
+        const y = padding.top + (i * cellHeight) + (cellHeight / 2);
+        const nombreLimpio = nombresLimpios[i];
+        const truncatedLabel = nombreLimpio.length > 32 ? nombreLimpio.substring(0, 29) + '...' : nombreLimpio;
+        // Sombra de texto para mejor legibilidad
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 1;
+        ctx.shadowOffsetY = 1;
+        ctx.fillText(truncatedLabel, padding.left - 20, y);
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+    });
+    
+    // Líneas de grid mejoradas (más sutiles)
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+    ctx.lineWidth = 0.5;
+    
+    // Líneas verticales
+    for (let j = 0; j <= variables.length; j++) {
+        const x = padding.left + (j * cellWidth);
+        ctx.beginPath();
+        ctx.moveTo(x, padding.top);
+        ctx.lineTo(x, padding.top + (variables.length * cellHeight));
+        ctx.stroke();
+    }
+    
+    // Líneas horizontales
+    for (let i = 0; i <= variables.length; i++) {
+        const y = padding.top + (i * cellHeight);
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(padding.left + (variables.length * cellWidth), y);
+        ctx.stroke();
+    }
+    
+    // La diagonal ya está resaltada en el código de celdas, no necesitamos línea adicional
+    
+    // Mostrar contenedor
+    container.style.display = 'block';
+    console.log('[generarHeatmapCorrelaciones] Heatmap generado y contenedor mostrado');
+    
+    // Crear tarjeta informativa pequeña e innovadora con top correlaciones
+    if (legendInfo) {
+        // Obtener top 5 correlaciones más fuertes
+        let topCorrelations = [];
+        if (info_variables && Object.keys(info_variables).length > 0) {
+            topCorrelations = Object.entries(info_variables)
+                .sort((a, b) => Math.abs(b[1].correlacion) - Math.abs(a[1].correlacion))
+                .slice(0, 5)
+                .map(([varName, info]) => ({
+                    nombre: limpiarNombreVariable(varName),
+                    correlacion: info.correlacion,
+                    absCorr: Math.abs(info.correlacion)
+                }));
+        }
+        
+        let legendHtml = '<div class="heatmap-info-card">';
+        // Botón compacto para expandir/colapsar
+        legendHtml += '<button class="info-card-toggle" onclick="toggleLegendInfo()" aria-expanded="false" aria-label="Mostrar/ocultar información">';
+        legendHtml += '<i class="fas fa-info-circle"></i>';
+        legendHtml += '<span class="info-card-title">Top Correlaciones</span>';
+        legendHtml += '<i class="fas fa-chevron-down info-chevron"></i>';
+        legendHtml += '</button>';
+        
+        // Contenido colapsable compacto
+        legendHtml += '<div class="info-card-content" id="legendContent" style="display: none;">';
+        
+        // Top correlaciones en formato compacto
+        if (topCorrelations.length > 0) {
+            legendHtml += '<div class="top-correlations-compact">';
+            topCorrelations.forEach((item, index) => {
+                const corr = item.correlacion;
+                const corrColor = corr > 0 ? '#E74C3C' : '#2D5AA0';
+                const corrIcon = corr > 0 ? '↑' : '↓';
+                const badgeColor = index === 0 ? '#F39C12' : index === 1 ? '#95A5A6' : index === 2 ? '#CD7F32' : 'rgba(0,0,0,0.3)';
+                
+                legendHtml += `
+                    <div class="correlation-item-compact" style="border-left: 3px solid ${corrColor};">
+                        <span class="corr-rank" style="background: ${badgeColor};">${index + 1}</span>
+                        <span class="corr-name">${item.nombre}</span>
+                        <span class="corr-value" style="color: ${corrColor};">${corrIcon} ${corr > 0 ? '+' : ''}${corr.toFixed(3)}</span>
+                    </div>
+                `;
+            });
+            legendHtml += '</div>';
+        }
+        
+        // Escala de correlación compacta
+        legendHtml += '<div class="legend-scale-compact">';
+        legendHtml += '<div class="scale-label">Escala:</div>';
+        legendHtml += '<div class="legend-gradient-compact">';
+        
+        // Crear gradiente de colores mejorado y más detallado para correlación
+        const steps = 50; // Más pasos para mejor detalle
+        for (let i = 0; i <= steps; i++) {
+            const normalized = i / steps;
+            const value = -1 + (normalized * 2); // De -1 a 1
+            let color;
+            const absValue = Math.abs(value);
+            
+            // Misma lógica de color que en getColorForCorrelation pero sin alpha
+            if (normalized < 0.5) {
+                const t = normalized / 0.5;
+                if (t < 0.33) {
+                    const t2 = t / 0.33;
+                    const r = Math.round(30 + t2 * (60 - 30));
+                    const g = Math.round(60 + t2 * (100 - 60));
+                    const b = Math.round(120 + t2 * (180 - 120));
+                    color = `rgb(${r}, ${g}, ${b})`;
+                } else if (t < 0.67) {
+                    const t2 = (t - 0.33) / 0.34;
+                    const r = Math.round(60 + t2 * (150 - 60));
+                    const g = Math.round(100 + t2 * (200 - 100));
+                    const b = Math.round(180 + t2 * (230 - 180));
+                    color = `rgb(${r}, ${g}, ${b})`;
+                } else {
+                    const t2 = (t - 0.67) / 0.33;
+                    const r = Math.round(150 + t2 * (240 - 150));
+                    const g = Math.round(200 + t2 * (245 - 200));
+                    const b = Math.round(230 + t2 * (250 - 230));
+                    color = `rgb(${r}, ${g}, ${b})`;
+                }
+            } else {
+                const t = (normalized - 0.5) / 0.5;
+                if (t < 0.33) {
+                    const t2 = t / 0.33;
+                    const r = Math.round(240 + t2 * (255 - 240));
+                    const g = Math.round(245 + t2 * (240 - 245));
+                    const b = Math.round(250 - t2 * (200 - 50));
+                    color = `rgb(${r}, ${g}, ${b})`;
+                } else if (t < 0.67) {
+                    const t2 = (t - 0.33) / 0.34;
+                    const r = Math.round(255);
+                    const g = Math.round(240 - t2 * (180 - 100));
+                    const b = Math.round(50 - t2 * 30);
+                    color = `rgb(${r}, ${g}, ${b})`;
+                } else {
+                    const t2 = (t - 0.67) / 0.33;
+                    const r = Math.round(255);
+                    const g = Math.round(100 - t2 * (100 - 30));
+                    const b = Math.round(20 - t2 * 20);
+                    color = `rgb(${r}, ${g}, ${b})`;
+                }
+            }
+            legendHtml += `<div class="legend-step-compact" style="background-color: ${color};" title="${value.toFixed(2)}"></div>`;
+        }
+        legendHtml += '</div>';
+        legendHtml += '<div class="scale-labels-compact">';
+        legendHtml += '<span>-1.0</span><span>0.0</span><span>+1.0</span>';
+        legendHtml += '</div>';
+        legendHtml += '</div>';
+        
+        // Información breve sobre el cálculo
+        legendHtml += '<div class="info-note-compact">';
+        legendHtml += '<i class="fas fa-chart-line"></i>';
+        legendHtml += '<span>Correlación de Pearson con Éxito del Proyecto</span>';
+        legendHtml += '</div>';
+        
+        legendHtml += '</div>'; // Cerrar info-card-content
+        legendHtml += '</div>'; // Cerrar heatmap-info-card
+        
+        legendInfo.innerHTML = legendHtml;
+    }
+    
+    // Función para toggle de la leyenda (debe ser global)
+    window.toggleLegendInfo = function() {
+        const content = document.getElementById('legendContent');
+        const btn = document.querySelector('.info-card-toggle');
+        const chevron = document.querySelector('.info-chevron');
+        
+        if (!content || !btn) return;
+        
+        const isExpanded = content.style.display !== 'none';
+        
+        if (isExpanded) {
+            content.style.display = 'none';
+            btn.setAttribute('aria-expanded', 'false');
+            if (chevron) {
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        } else {
+            content.style.display = 'block';
+            btn.setAttribute('aria-expanded', 'true');
+            if (chevron) {
+                chevron.style.transform = 'rotate(180deg)';
+            }
+        }
+    };
+    
+    // Agregar interactividad: tooltip al hacer hover
+    canvas.addEventListener('mousemove', function(e) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        if (x >= padding.left && x <= padding.left + (variables.length * cellWidth) &&
+            y >= padding.top && y <= padding.top + (variables.length * cellHeight)) {
+            
+            const col = Math.floor((x - padding.left) / cellWidth);
+            const row = Math.floor((y - padding.top) / cellHeight);
+            
+            if (col >= 0 && col < variables.length && row >= 0 && row < variables.length) {
+                const value = matriz[row][col];
+                const var1 = nombresLimpios[row];
+                const var2 = nombresLimpios[col];
+                const var1Original = variables[row];
+                const var2Original = variables[col];
+                
+                let tooltipText = `${var1} ↔ ${var2}\nCorrelación: ${value !== null ? value.toFixed(3) : 'N/A'}`;
+                
+                // Si es correlación con éxito, agregar información adicional
+                if (var2Original === '_Exito_Numerico' && info_variables && info_variables[var1Original]) {
+                    const info = info_variables[var1Original];
+                    tooltipText += `\nPromedio: ${info.promedio.toFixed(2)}`;
+                    tooltipText += `\nRango: ${info.min.toFixed(2)} - ${info.max.toFixed(2)}`;
+                }
+                
+                canvas.title = tooltipText;
+                canvas.style.cursor = 'pointer';
+            } else {
+                canvas.title = '';
+                canvas.style.cursor = 'default';
+            }
+        } else {
+            canvas.title = '';
+            canvas.style.cursor = 'default';
+        }
+    });
+}
+
+// Configurar modal de información sobre clasificación
+function setupInfoModal() {
+    const infoBtn = document.getElementById('info-classification-btn');
+    const modal = document.getElementById('classification-info-modal');
+    const closeBtn = modal ? modal.querySelector('.info-modal-close') : null;
+    const backdrop = modal ? modal.querySelector('.info-modal-backdrop') : null;
+    
+    if (!infoBtn || !modal) return;
+    
+    // Abrir modal
+    infoBtn.addEventListener('click', function() {
+        modal.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+        // Enfocar el botón de cerrar
+        if (closeBtn) {
+            setTimeout(() => closeBtn.focus(), 100);
+        }
+    });
+    
+    // Cerrar modal
+    function closeModal() {
+        modal.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
+        // Devolver foco al botón de información
+        infoBtn.focus();
+    }
+    
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeModal);
+    }
+    
+    if (backdrop) {
+        backdrop.addEventListener('click', closeModal);
+    }
+    
+    // Cerrar con Esc
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && modal.getAttribute('aria-hidden') === 'false') {
+            closeModal();
+        }
+    });
 }

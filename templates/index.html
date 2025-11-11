@@ -14,6 +14,9 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    
     <!-- CSS personalizado -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/sidebar-modern.css') }}">
@@ -33,13 +36,197 @@
             <h1><i class="fas fa-map-marked-alt"></i> Mapa Interactivo de Proyectos Inmobiliarios</h1>
             <p><i class="fas fa-map-marker-alt"></i> Cali, Colombia</p>
         </div>
+        <!-- Botón de información sobre clasificación -->
+        <button id="info-classification-btn" class="info-btn" aria-label="Información sobre clasificación de proyectos" title="¿Cómo se clasifican los proyectos?">
+            <i class="fas fa-info-circle"></i>
+        </button>
     </header>
+    
+    <!-- Modal de información sobre clasificación -->
+    <div id="classification-info-modal" class="info-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
+        <div class="info-modal-backdrop"></div>
+        <div class="info-modal-content">
+            <div class="info-modal-header">
+                <h2 id="modal-title"><i class="fas fa-graduation-cap"></i> Sistema de Clasificación de Proyectos</h2>
+                <button class="info-modal-close" aria-label="Cerrar" title="Cerrar">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="info-modal-body">
+                <div class="info-section">
+                    <h3><i class="fas fa-chart-line"></i> Descripción General</h3>
+                    <p>El sistema clasifica automáticamente los proyectos inmobiliarios en tres categorías (<strong>Exitosos</strong>, <strong>Moderados</strong>, <strong>Mejorables</strong>) mediante un modelo de scoring multi-variable que evalúa múltiples métricas de desempeño.</p>
+                </div>
+                
+                <div class="info-section">
+                    <h3><i class="fas fa-calculator"></i> Métricas Evaluadas</h3>
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-tachometer-alt"></i></div>
+                            <div class="metric-info">
+                                <h4>Velocidad de Ventas (30%)</h4>
+                                <p>Meses para agotar inventario. Proyectos más rápidos reciben mayor puntuación.</p>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-chart-bar"></i></div>
+                            <div class="metric-info">
+                                <h4>Velocidad Histórica (18%)</h4>
+                                <p>Unidades vendidas por mes. Evalúa el ritmo constante de ventas.</p>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-percentage"></i></div>
+                            <div class="metric-info">
+                                <h4>Porcentaje Vendido (12%)</h4>
+                                <p>Penetración en el mercado. Mayor porcentaje vendido = mejor score.</p>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-clock"></i></div>
+                            <div class="metric-info">
+                                <h4>Antigüedad y Eficiencia (10%)</h4>
+                                <p>Eficiencia temporal del proyecto. Proyectos más antiguos con buen desempeño reciben penalización.</p>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-building"></i></div>
+                            <div class="metric-info">
+                                <h4>Tamaño del Proyecto (7%)</h4>
+                                <p>Número total de unidades. Proyectos de tamaño óptimo reciben mejor puntuación.</p>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-dollar-sign"></i></div>
+                            <div class="metric-info">
+                                <h4>Precio por m² (7%)</h4>
+                                <p>Posición competitiva del precio. Comparado con el percentil de la zona.</p>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-ruler-combined"></i></div>
+                            <div class="metric-info">
+                                <h4>Área Promedio (5%)</h4>
+                                <p>Área promedio de las unidades. Tamaños óptimos reciben mejor puntuación.</p>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-star"></i></div>
+                            <div class="metric-info">
+                                <h4>Características (4%)</h4>
+                                <p>Número de alcobas, baños y garajes. Más características = mejor score.</p>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-swimming-pool"></i></div>
+                            <div class="metric-info">
+                                <h4>Amenidades (3%)</h4>
+                                <p>Número de amenidades disponibles. Proyectos con más amenidades reciben mejor puntuación.</p>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-icon"><i class="fas fa-chart-area"></i></div>
+                            <div class="metric-info">
+                                <h4>Patrón de Ventas (2%)</h4>
+                                <p>Patrón de comportamiento de ventas (Acelerado, Constante, Desacelerado).</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="info-section">
+                    <h3><i class="fas fa-trophy"></i> Categorías de Clasificación</h3>
+                    <div class="classification-cards">
+                        <div class="classification-card success">
+                            <div class="classification-header">
+                                <i class="fas fa-check-circle"></i>
+                                <h4>Exitoso</h4>
+                            </div>
+                            <div class="classification-body">
+                                <p><strong>Score:</strong> 0.62 - 0.79</p>
+                                <p><strong>Características:</strong></p>
+                                <ul>
+                                    <li>Top 33% más rápido en agotar inventario</li>
+                                    <li>Alta velocidad de ventas</li>
+                                    <li>Patrón de ventas Acelerado o Constante</li>
+                                    <li>Score compuesto ≥ 0.67</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="classification-card moderate">
+                            <div class="classification-header">
+                                <i class="fas fa-exclamation-circle"></i>
+                                <h4>Moderado</h4>
+                            </div>
+                            <div class="classification-body">
+                                <p><strong>Score:</strong> 0.50 - 0.62</p>
+                                <p><strong>Características:</strong></p>
+                                <ul>
+                                    <li>33%-67% en velocidad de ventas</li>
+                                    <li>Desempeño promedio</li>
+                                    <li>Patrón de ventas Constante o Desacelerado</li>
+                                    <li>Score compuesto 0.33 - 0.67</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="classification-card improve">
+                            <div class="classification-header">
+                                <i class="fas fa-times-circle"></i>
+                                <h4>Mejorable</h4>
+                            </div>
+                            <div class="classification-body">
+                                <p><strong>Score:</strong> 0.21 - 0.50</p>
+                                <p><strong>Características:</strong></p>
+                                <ul>
+                                    <li>Bottom 33% en velocidad de ventas</li>
+                                    <li>Baja velocidad de ventas</li>
+                                    <li>Patrón de ventas Desacelerado</li>
+                                    <li>Score compuesto < 0.33</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="info-section">
+                    <h3><i class="fas fa-cogs"></i> Proceso de Clasificación</h3>
+                    <ol class="process-steps">
+                        <li>
+                            <strong>Clasificación por Segmentos:</strong> Los proyectos se agrupan por Zona + Estrato + Tipo_VIS para comparación justa dentro del mismo segmento de mercado.
+                        </li>
+                        <li>
+                            <strong>Cálculo de Scores:</strong> Se calculan scores normalizados (0-1) para cada métrica evaluada.
+                        </li>
+                        <li>
+                            <strong>Score Compuesto:</strong> Se combinan todos los scores con sus respectivos pesos para obtener un score final.
+                        </li>
+                        <li>
+                            <strong>Clasificación Final:</strong> Basado en el score compuesto, se asigna la categoría correspondiente.
+                        </li>
+                        <li>
+                            <strong>Ajuste de Score:</strong> El score final se ajusta para que coincida con los rangos esperados de cada categoría.
+                        </li>
+                    </ol>
+                </div>
+                
+                <div class="info-section">
+                    <h3><i class="fas fa-lightbulb"></i> Notas Importantes</h3>
+                    <ul class="notes-list">
+                        <li>La clasificación se realiza automáticamente al cargar los datos desde <strong>Base Proyectos.xlsx</strong>.</li>
+                        <li>El sistema garantiza que <strong>TODOS</strong> los proyectos tengan una clasificación válida (nunca "Sin Clasificar").</li>
+                        <li>Si un proyecto no puede clasificarse por segmento, se usa el método global como fallback.</li>
+                        <li>Los scores se normalizan para permitir comparación justa entre proyectos de diferentes segmentos.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
 
         <!-- Sidebar de filtros y proyectos (off-canvas) - Fuera del contenedor para evitar problemas de overflow -->
         <aside class="sidebar" id="sidebar" role="dialog" aria-modal="true" aria-labelledby="sidebar-title" aria-hidden="true" tabindex="-1">
             <div class="sidebar-header">
                 <h2 id="sidebar-title"><i class="fas fa-sliders-h"></i> <span class="sidebar-title">Panel de Control</span></h2>
-            </div>
+                </div>
             
             <!-- Resize handle para redimensionar el panel -->
             <div class="sidebar-resize-handle" id="sidebar-resize-handle" title="Arrastra para redimensionar el ancho del panel">
@@ -138,6 +325,52 @@
                                     <i class="fas fa-times"></i> Limpiar
                                 </button>
                             </div>
+                </div>
+
+                <!-- Búsqueda por nombre de Proyecto -->
+                <div class="filter-section">
+                                <label for="proyecto_search" class="filter-label">
+                                    <i class="fas fa-search"></i> Buscar Proyecto
+                                </label>
+                                <div class="search-input-modern">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" id="proyecto_search" class="search-input-control" placeholder="Escribe el nombre del proyecto...">
+                                    <button id="proyecto_search_clear" class="search-clear-btn" title="Limpiar búsqueda" aria-label="Limpiar">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <small id="proyecto_search_info" class="search-info-text-modern">Filtra la tabla y el mapa por nombre.</small>
+                </div>
+
+                <!-- Rango de Área (m²) con decimales -->
+                <div class="filter-section">
+                                <label for="area_range" class="filter-label">
+                                    <i class="fas fa-ruler-combined"></i> Rango de Área (m²)
+                                </label>
+                                <div class="area-range-modern">
+                                    <div class="area-input-wrapper">
+                                        <label for="area_min" class="area-label-modern">Mínimo</label>
+                                        <input type="number" id="area_min" class="area-input-modern" placeholder="0.0" min="0" step="0.1" inputmode="decimal">
+                                    </div>
+                                    <div class="area-separator-modern">
+                                        <i class="fas fa-arrows-alt-h"></i>
+                                    </div>
+                                    <div class="area-input-wrapper">
+                                        <label for="area_max" class="area-label-modern">Máximo</label>
+                                        <input type="number" id="area_max" class="area-input-modern" placeholder="∞" min="0" step="0.1" inputmode="decimal">
+                                    </div>
+                                </div>
+                                <div class="area-range-info-modern">
+                                    <small id="area_range_info" class="area-info-text-modern">Rango completo disponible</small>
+                                </div>
+                                <div class="area-buttons-modern">
+                                    <button id="aplicar_area" class="btn-apply-modern">
+                                        <i class="fas fa-check"></i> Aplicar
+                                    </button>
+                                    <button id="limpiar_area" class="btn-clear-modern">
+                                        <i class="fas fa-times"></i> Limpiar
+                                    </button>
+                                </div>
                 </div>
             </div>
             
@@ -247,9 +480,6 @@
                                         <i class="fas fa-list-ul"></i>
                                         <span>Distribución por Categoría</span>
                                     </div>
-                                    <button type="button" id="category-table-toggle" class="category-table-toggle" title="Alternar vista compacta/completa">
-                                        <i class="fas fa-compress-alt" id="category-table-toggle-icon"></i>
-                                    </button>
                                 </div>
                                 
                                 <!-- Buscador y controles de ordenamiento -->
@@ -296,80 +526,20 @@
                             
                             <div class="stats-chart-container-sidebar">
                                 <div class="chart-title-sidebar">
-                                    <i class="fas fa-chart-bar"></i> Distribución por Clasificación
+                                    <i class="fas fa-chart-pie"></i> <span id="pie-chart-title">Distribución por Categoría</span>
                                 </div>
-                                <div class="chart-bars-sidebar" id="chart-bars">
-                                    <div class="chart-bar-item-sidebar">
-                                        <div class="chart-bar-label-sidebar">Exitosos</div>
-                                        <div class="chart-bar-wrapper-sidebar">
-                                            <div class="chart-bar-fill-sidebar success" id="chart-exitosos" style="width: 0%"></div>
-                                            <span class="chart-bar-value-sidebar" id="chart-exitosos-value">0%</span>
-                                        </div>
-                                    </div>
-                                    <div class="chart-bar-item-sidebar">
-                                        <div class="chart-bar-label-sidebar">Moderados</div>
-                                        <div class="chart-bar-wrapper-sidebar">
-                                            <div class="chart-bar-fill-sidebar moderate" id="chart-moderados" style="width: 0%"></div>
-                                            <span class="chart-bar-value-sidebar" id="chart-moderados-value">0%</span>
-                                        </div>
-                                    </div>
-                                    <div class="chart-bar-item-sidebar">
-                                        <div class="chart-bar-label-sidebar">Mejorables</div>
-                                        <div class="chart-bar-wrapper-sidebar">
-                                            <div class="chart-bar-fill-sidebar improve" id="chart-mejorables" style="width: 0%"></div>
-                                            <span class="chart-bar-value-sidebar" id="chart-mejorables-value">0%</span>
-                                        </div>
-                                    </div>
+                                <div class="pie-chart-wrapper-sidebar">
+                                    <canvas id="pie-chart-canvas"></canvas>
+                                    <div class="pie-chart-legend" id="pie-chart-legend"></div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Información de clasificación (colapsable) -->
-                <div class="sidebar-info-modern">
-                    <details class="info-details">
-                        <summary class="info-summary">
-                            <i class="fas fa-question-circle"></i>
-                            <span>¿Cómo se clasifican los proyectos?</span>
-                            <i class="fas fa-chevron-down summary-arrow"></i>
-                        </summary>
-                        <div class="info-content-modern">
-                            <h4>Sistema de Clasificación de Proyectos</h4>
-                        <p>Los proyectos se clasifican en tres categorías basándose en múltiples métricas y un modelo de Machine Learning avanzado:</p>
-                        
-                            <div class="classification-detail-modern">
-                            <h5><i class="fas fa-check-circle" style="color: #27AE60;"></i> Exitosos</h5>
-                            <ul>
-                                <li><strong>Score de Éxito:</strong> 0.62 - 0.79</li>
-                                <li><strong>Velocidad de ventas:</strong> Alta (típicamente 22+ unidades/mes)</li>
-                                <li><strong>Meses para agotar:</strong> Menos de 18 meses</li>
-                            </ul>
-                        </div>
-                        
-                            <div class="classification-detail-modern">
-                            <h5><i class="fas fa-exclamation-circle" style="color: #F39C12;"></i> Moderados</h5>
-                            <ul>
-                                <li><strong>Score de Éxito:</strong> 0.50 - 0.62</li>
-                                <li><strong>Velocidad de ventas:</strong> Media (típicamente 8-22 unidades/mes)</li>
-                                <li><strong>Meses para agotar:</strong> 18 - 36 meses</li>
-                            </ul>
-                        </div>
-                        
-                            <div class="classification-detail-modern">
-                            <h5><i class="fas fa-times-circle" style="color: #E74C3C;"></i> Mejorables</h5>
-                            <ul>
-                                <li><strong>Score de Éxito:</strong> 0.21 - 0.50</li>
-                                <li><strong>Velocidad de ventas:</strong> Baja (menos de 8 unidades/mes)</li>
-                                <li><strong>Meses para agotar:</strong> Más de 36 meses</li>
-                            </ul>
-                        </div>
-                    </div>
-                </details>
-            </div>
-            </div> <!-- Cierre de sidebar-content -->
+ <!-- Cierre de sidebar-content -->
         </aside>
-    
+
     <!-- Contenedor principal -->
     <div class="container main-container">
         <!-- Contenido principal -->
@@ -430,6 +600,13 @@
                                     <button id="center-data-btn" class="map-control-btn" aria-label="Centrar mapa en todos los proyectos" title="Centrar datos">
                                         <i class="fas fa-crosshairs"></i>
                                         <span>Centrar Datos</span>
+                                    </button>
+                                </div>
+                                
+                                <div class="map-control-group">
+                                    <button id="clear-filters-btn" class="map-control-btn" aria-label="Limpiar todos los filtros excepto Estado del Proyecto" title="Limpiar Filtros">
+                                        <i class="fas fa-eraser"></i>
+                                        <span>Limpiar Filtros</span>
                                     </button>
                                 </div>
                                 
@@ -650,6 +827,17 @@
                             <div class="loading-state">
                                 <i class="fas fa-spinner fa-spin"></i> Cargando características...
                             </div>
+                        </div>
+                        <!-- Mapa de Calor de Correlaciones -->
+                        <div class="heatmap-container" id="correlation-heatmap-container" style="display: none;">
+                            <div class="heatmap-header">
+                                <h4><i class="fas fa-project-diagram"></i> Mapa de Calor de Correlaciones con Éxito del Proyecto</h4>
+                                <p class="heatmap-subtitle">Análisis de correlación entre variables originales del proyecto y su éxito. Los colores indican la fuerza y dirección de la correlación (rojo=positiva fuerte, azul=negativa fuerte).</p>
+                            </div>
+                            <div class="heatmap-wrapper">
+                                <canvas id="correlation-heatmap"></canvas>
+                            </div>
+                            <div class="heatmap-legend-info" id="correlation-heatmap-legend-info"></div>
                         </div>
                     </div>
                 </div>
