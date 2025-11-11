@@ -6,14 +6,32 @@ Sistema moderno sin dependencia de Streamlit usando Flask + Leaflet
 # Importar utilidades comunes (manejo de codificación)
 import utils
 
-from flask import Flask, render_template, jsonify, request, make_response
+from flask import Flask, render_template, jsonify, request, make_response, send_from_directory
 import pandas as pd
 import numpy as np
 import io
 from datetime import datetime
 from pathlib import Path
+import os
 
-app = Flask(__name__)
+# Configurar Flask con rutas explícitas para archivos estáticos
+app = Flask(__name__, 
+            static_folder='static',
+            static_url_path='/static',
+            template_folder='templates')
+
+# Configurar MIME types correctos para archivos estáticos
+@app.after_request
+def set_mime_types(response):
+    """Configura MIME types correctos para archivos estáticos"""
+    if request.path.startswith('/static/'):
+        if request.path.endswith('.js'):
+            response.headers['Content-Type'] = 'application/javascript; charset=utf-8'
+        elif request.path.endswith('.css'):
+            response.headers['Content-Type'] = 'text/css; charset=utf-8'
+        elif request.path.endswith('.json'):
+            response.headers['Content-Type'] = 'application/json; charset=utf-8'
+    return response
 
 # ------------------------------
 # Configuración y constantes
@@ -26,6 +44,9 @@ COLORES_CLASIFICACION = {
 
 # Variable global para almacenar características de proyectos exitosos
 caracteristicas_exitosos_global = {}
+
+# Variable global para almacenar el dataframe completo con todas las columnas originales
+df_completo_global = None
 
 # ------------------------------
 # Funciones auxiliares
@@ -380,6 +401,11 @@ def generar_clasificacion_en_memoria(xlsx_path=None):
         print()
         
         try:
+            # Guardar el dataframe completo antes de generar el archivo final
+            global df_completo_global
+            df_completo_global = proj_ds.copy()
+            print(f"  ✓ DataFrame completo guardado globalmente: {len(df_completo_global)} proyectos, {len(df_completo_global.columns)} columnas")
+            
             resultado = gen_clas.generar_archivo_final(proj_ds, cols_proy, key_pry)
             
             if resultado is None or resultado.empty:
@@ -766,6 +792,11 @@ def index():
     mapillary_token = os.getenv('MAPILLARY_TOKEN', 'MLY|YOUR_TOKEN_HERE')
     return render_template('index.html', mapillary_token=mapillary_token)
 
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Sirve archivos estáticos con MIME types correctos."""
+    return send_from_directory(app.static_folder, filename)
+
 @app.route('/api/diagnostico')
 def diagnostico():
     """API de diagnóstico para verificar el estado de los datos."""
@@ -1100,6 +1131,10 @@ def regenerar_clasificacion():
 
 @app.route('/api/caracteristicas-exitosos')
 def get_caracteristicas_exitosos():
+    """
+    Obtiene las características más comunes de proyectos exitosos.
+    Ahora también incluye las características con mayor correlación del mapa de calor.
+    """
     """API para obtener las características comunes de proyectos exitosos."""
     try:
         global caracteristicas_exitosos_global
@@ -1116,6 +1151,602 @@ def get_caracteristicas_exitosos():
         })
     except Exception as e:
         print(f"❌ Error en /api/caracteristicas-exitosos: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/correlaciones-exito', methods=['GET'])
+def get_correlaciones_exito():
+    """API para calcular correlaciones entre variables originales y éxito del proyecto.
+    
+    Analiza todas las variables numéricas del dataframe original y calcula su correlación
+    con la clasificación de éxito (transformada a numérica: Exitoso=1, Moderado=0.5, Mejorable=0).
+    Retorna una matriz de correlaciones para visualización en mapa de calor.
+    """
+    try:
+        global df_completo_global
+        
+        print(f"[DEBUG] df_completo_global es None: {df_completo_global is None}")
+        if df_completo_global is not None:
+            print(f"[DEBUG] df_completo_global está vacío: {df_completo_global.empty}")
+            print(f"[DEBUG] df_completo_global tiene {len(df_completo_global)} filas y {len(df_completo_global.columns)} columnas")
+        
+        if df_completo_global is None or df_completo_global.empty:
+            print("[ERROR] df_completo_global no está disponible o está vacío")
+            return jsonify({
+                'success': False,
+                'error': 'No hay datos completos disponibles. Regenera la clasificación.',
+                'debug': {
+                    'is_none': df_completo_global is None,
+                    'is_empty': df_completo_global.empty if df_completo_global is not None else True
+                }
+            }), 404
+        
+        print("=" * 70)
+        print("  CALCULANDO CORRELACIONES CON ÉXITO DEL PROYECTO")
+        print("=" * 70)
+        
+        # Crear copia del dataframe para trabajar
+        df = df_completo_global.copy()
+        
+        # Transformar clasificación a numérica
+        # Exitoso = 1.0, Moderado = 0.5, Mejorable = 0.0
+        clasificacion_map = {
+            'Exitoso': 1.0,
+            'Moderado': 0.5,
+            'Mejorable': 0.0
+        }
+        
+        if 'Clasificacion' not in df.columns:
+            return jsonify({
+                'success': False,
+                'error': 'No se encontró la columna Clasificacion en los datos.'
+            }), 404
+        
+        df['_Exito_Numerico'] = df['Clasificacion'].map(clasificacion_map).fillna(0.5)
+        
+        # Seleccionar solo columnas numéricas (excluyendo identificadores y coordenadas)
+        columnas_excluidas = {
+            'Codigo_Proyecto', 'Proyecto', 'Clasificacion', 'Clasificacion_Compuesta',
+            'Coordenadas Reales', 'Coordenadas', 'Lat', 'Lon', 'Coordenadas_Parsed',
+            'Zona', 'Barrio', 'Tipo_VIS_Principal', 'Tipo VIS', 'Tipo_VIS',
+            'Patron_Ventas', 'Vende', 'Estado Etapas', 'Estado_Etapas',
+            '_Exito_Numerico'  # Temporal, se agregará después
+        }
+        
+        # Obtener columnas numéricas
+        columnas_numericas = []
+        for col in df.columns:
+            if col in columnas_excluidas:
+                continue
+            
+            # Intentar convertir a numérico
+            try:
+                serie_numerica = pd.to_numeric(df[col], errors='coerce')
+                # Verificar que al menos el 50% de los valores sean numéricos válidos
+                valores_validos = serie_numerica.notna().sum()
+                if valores_validos >= len(df) * 0.5:
+                    # Verificar que los valores convertidos sean realmente numéricos (no NaN)
+                    # y que no haya demasiados valores únicos que sugieran que es categórico
+                    valores_unicos = serie_numerica.dropna().nunique()
+                    # Si tiene más de 100 valores únicos o menos del 10% de valores válidos, probablemente no es útil
+                    if valores_unicos <= 100 or valores_validos >= len(df) * 0.1:
+                        # Verificar que los valores sean realmente numéricos (no strings que se convirtieron a NaN)
+                        # Comparar con la serie original para detectar strings que no se pudieron convertir
+                        valores_originales = df[col].dropna()
+                        if len(valores_originales) > 0:
+                            # Si más del 80% de los valores originales se convirtieron exitosamente, es numérico
+                            ratio_conversion = valores_validos / len(valores_originales)
+                            if ratio_conversion >= 0.8:
+                                columnas_numericas.append(col)
+            except Exception as e:
+                # Si hay error al procesar, omitir la columna
+                print(f"  [ADV] Omitiendo columna '{col}' por error: {str(e)[:50]}")
+                continue
+        
+        print(f"  ✓ Encontradas {len(columnas_numericas)} columnas numéricas")
+        
+        # Lista de variables categóricas específicas que el usuario quiere analizar
+        # Estas son características de proyectos que queremos incluir en el análisis
+        # IMPORTANTE: Estas son las ÚNICAS variables que queremos mostrar en el heatmap
+        variables_categoricas_importantes = [
+            'Coc. Integral', 'Extractor', 'Estufa Gas / Eléc.', 'Horno Gas / Eléc.',
+            'Cal. Gas / Eléc.', 'Chimeneas', 'Tinas', 'Pta Duchas', 'Depósito',
+            'Portería', 'Salón Social', 'Parque Inf.', 'Canchas', 'Gimnasio',
+            'Planta Eléct.', 'Ofrece Piscina', 'Shut Basuras', 'Zonas Humedas',
+            'BBQ', 'Zona Mascotas', 'Parqueaderos', 'Inst. Lavad. / Secadora',
+            'Lavad.', 'Aire Acond.', 'Mueble Cocina', 'Mesón Cocina', 'Mesón Baños',
+            'Piso Halles Com.', 'Piso Halles Viv.', 'Piso Alcoba', 'Piso Zona Social',
+            'Piso Baño', 'Piso Cocina', 'Muros Coc.', 'Muros Baños', 'Mueble Lavamanos',
+            'Tipo De Sanitario Alcoba Princ.', 'Pared Ducha', 'Tipo Griferia Lav.',
+            'Tipo Griferia Ducha', 'Tipo de Sanitario Otros Baños', 'Tipo de Lavamanos',
+            'Tipo Ducha', 'Tipo Griferia Lavaplatos', 'Muros Interiores',
+            'Carpinteria Puertas/Closets', 'Fachada', 'Vent.', 'Tipo Est.',
+            'Tipo Urbanizacion', 'Cómo se Entrega', 'Otro'
+        ]
+        
+        print(f"  ✓ Buscando {len(variables_categoricas_importantes)} variables categóricas específicas")
+        
+        # Convertir variables categóricas a numéricas usando diferentes métodos según el tipo
+        # Aplicar: One-hot para binarias, Frequency encoding para multi-categoría, etc.
+        columnas_categoricas_numericas = []
+        df_corr_categoricas = pd.DataFrame()
+        
+        for col in variables_categoricas_importantes:
+            if col not in df.columns:
+                continue
+                
+            serie_categorica = df[col].astype(str).str.strip()
+            
+            # Detectar valores nulos o vacíos
+            valores_validos = serie_categorica[serie_categorica.notna() & (serie_categorica != '') & (serie_categorica != 'nan')]
+            
+            if len(valores_validos) < len(df) * 0.03:
+                # Si hay muy pocos valores válidos, omitir esta columna
+                continue
+            
+            valores_unicos = valores_validos.unique()
+            num_valores_unicos = len(valores_unicos)
+            
+            # Detectar si es variable binaria (Si/No, Sí/No, etc.)
+            valores_positivos = ['Si', 'Sí', 'Incluido', 'Yes', '1', 'True', 'true', 'SI', 'SÍ', 'Incluido', 'Sí']
+            valores_binarios = [v for v in valores_unicos if str(v).strip() in valores_positivos or str(v).strip().lower() in [vp.lower() for vp in valores_positivos]]
+            
+            # MÉTODO 1: Codificación binaria (0/1) para variables binarias simples
+            if len(valores_binarios) > 0 and num_valores_unicos <= 3:
+                serie_numerica = serie_categorica.apply(
+                    lambda x: 1 if str(x).strip() in valores_positivos or str(x).strip().lower() in [v.lower() for v in valores_positivos] else 0
+                )
+                
+                suma_ones = serie_numerica.sum()
+                suma_zeros = len(serie_numerica) - suma_ones
+                
+                # Incluir si tiene al menos 1% de cada valor (muy permisivo)
+                if suma_ones >= len(df) * 0.01 and suma_zeros >= len(df) * 0.01:
+                    nombre_col_nueva = f"{col}_num"
+                    df_corr_categoricas[nombre_col_nueva] = serie_numerica
+                    columnas_categoricas_numericas.append(nombre_col_nueva)
+                    print(f"  ✓ [BINARIA] {col} -> {nombre_col_nueva} (1s: {suma_ones}, 0s: {suma_zeros})")
+                else:
+                    print(f"  ⚠ [BINARIA] {col} omitida: muy desbalanceada (1s: {suma_ones}, 0s: {suma_zeros})")
+            
+            # MÉTODO 2: Frequency/Count Encoding para variables con múltiples categorías
+            # Reemplazar cada categoría por su frecuencia en el dataset
+            elif num_valores_unicos > 1 and num_valores_unicos <= 50:
+                # Calcular frecuencia de cada categoría
+                frecuencias = valores_validos.value_counts()
+                # Normalizar por el total para obtener proporción (0-1)
+                frecuencias_norm = frecuencias / len(valores_validos)
+                
+                # Mapear cada valor a su frecuencia normalizada
+                serie_numerica = serie_categorica.map(frecuencias_norm)
+                # Reemplazar NaN (valores no vistos) con 0
+                serie_numerica = serie_numerica.fillna(0)
+                
+                # Verificar variación
+                if serie_numerica.var() > 0.001:
+                    nombre_col_nueva = f"{col}_num"
+                    df_corr_categoricas[nombre_col_nueva] = serie_numerica
+                    columnas_categoricas_numericas.append(nombre_col_nueva)
+                    print(f"  ✓ [FREQUENCY] {col} -> {nombre_col_nueva} ({num_valores_unicos} categorías, varianza: {serie_numerica.var():.4f})")
+                else:
+                    print(f"  ⚠ [FREQUENCY] {col} omitida: poca variación (varianza: {serie_numerica.var():.4f})")
+            
+            # MÉTODO 3: One-Hot Encoding simplificado (presencia/ausencia) para alta cardinalidad
+            # En lugar de crear múltiples columnas, usar una sola columna de presencia
+            elif num_valores_unicos > 50:
+                # Codificación de presencia: 1 si tiene valor, 0 si no
+                serie_numerica = serie_categorica.apply(
+                    lambda x: 1 if str(x).strip() not in ['', 'nan', 'None', 'NaN'] and pd.notna(x) else 0
+                )
+                
+                if serie_numerica.sum() >= len(df) * 0.01:
+                    nombre_col_nueva = f"{col}_num"
+                    df_corr_categoricas[nombre_col_nueva] = serie_numerica
+                    columnas_categoricas_numericas.append(nombre_col_nueva)
+                    print(f"  ✓ [PRESENCIA] {col} -> {nombre_col_nueva} ({num_valores_unicos} categorías, presencia: {serie_numerica.sum()})")
+                else:
+                    print(f"  ⚠ [PRESENCIA] {col} omitida: muy pocos valores válidos")
+            
+            # MÉTODO 4: Label Encoding para variables con pocas categorías (2-10)
+            # Asignar números enteros a cada categoría
+            else:
+                # Crear mapeo de categorías a enteros
+                categorias_ordenadas = sorted([v for v in valores_unicos if str(v).strip() not in ['', 'nan', 'None', 'NaN']])
+                label_map = {cat: idx for idx, cat in enumerate(categorias_ordenadas)}
+                
+                serie_numerica = serie_categorica.map(label_map)
+                serie_numerica = serie_numerica.fillna(-1)  # Valores no vistos = -1
+                
+                # Verificar variación
+                if serie_numerica.var() > 0.1:
+                    nombre_col_nueva = f"{col}_num"
+                    df_corr_categoricas[nombre_col_nueva] = serie_numerica
+                    columnas_categoricas_numericas.append(nombre_col_nueva)
+                    print(f"  ✓ [LABEL] {col} -> {nombre_col_nueva} ({num_valores_unicos} categorías, varianza: {serie_numerica.var():.4f})")
+                else:
+                    print(f"  ⚠ [LABEL] {col} omitida: poca variación (varianza: {serie_numerica.var():.4f})")
+        
+        print(f"  ✓ Convertidas {len(columnas_categoricas_numericas)} variables categóricas a numéricas usando diferentes métodos")
+        
+        # IMPORTANTE: SOLO usar las variables categóricas convertidas (NO las numéricas originales)
+        # El usuario quiere ver SOLO las características categóricas en el heatmap
+        if len(columnas_categoricas_numericas) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'No se encontraron variables categóricas para analizar. Verifica que las columnas existan en los datos.'
+            }), 404
+        
+        print(f"  ✓ Usando SOLO {len(columnas_categoricas_numericas)} variables categóricas (sin variables numéricas)")
+        
+        # Preparar datos para correlación
+        # Incluir SOLO _Exito_Numerico y las variables categóricas convertidas
+        columnas_para_corr = columnas_categoricas_numericas + ['_Exito_Numerico']
+        
+        # Crear DataFrame SOLO con las categóricas convertidas + éxito
+        df_corr = pd.DataFrame()
+        df_corr['_Exito_Numerico'] = df['_Exito_Numerico']
+        
+        # Agregar las columnas categóricas convertidas
+        for col in columnas_categoricas_numericas:
+            df_corr[col] = df_corr_categoricas[col]
+        
+        # Las variables categóricas ya están convertidas a numéricas (0/1)
+        # No necesitamos convertir nada más, solo asegurarnos de que todas estén presentes
+        for col in columnas_categoricas_numericas:
+            if col not in df_corr.columns and col in df_corr_categoricas.columns:
+                df_corr[col] = df_corr_categoricas[col]
+        
+        print(f"  ✓ DataFrame de correlación creado con {len(df_corr.columns)} columnas (categóricas + éxito)")
+        
+        # Verificar variación en las variables antes de calcular correlaciones
+        # Ser más permisivo ahora que usamos diferentes métodos de codificación
+        # Las variables ya fueron filtradas durante la conversión, así que solo verificamos que no sean constantes
+        columnas_con_variacion = []
+        for col in columnas_categoricas_numericas:
+            serie = df_corr_categoricas[col].dropna()
+            if len(serie) > 0:
+                varianza = serie.var()
+                valores_unicos = serie.nunique()
+                
+                # Criterios muy permisivos según el tipo de codificación
+                # Para binarias: varianza > 0.0001 (muy permisivo, permite hasta 99.9% de un valor)
+                # Para frequency/label: varianza > 0.00001 (muy permisivo)
+                # Solo excluir variables completamente constantes (varianza = 0)
+                if varianza > 0.00001 and valores_unicos >= 1:
+                    columnas_con_variacion.append(col)
+                    # Solo mostrar en detalle si hay muchas variables
+                    if len(columnas_categoricas_numericas) <= 20:
+                        print(f"  ✓ Variable '{col}' incluida (varianza: {varianza:.6f}, valores únicos: {valores_unicos})")
+                else:
+                    print(f"  ⚠ Variable '{col}' omitida: sin variación (varianza: {varianza:.6f}, valores únicos: {valores_unicos})")
+        
+        if len(columnas_con_variacion) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'No hay variables categóricas con suficiente variación para calcular correlaciones significativas.'
+            }), 404
+        
+        # Actualizar columnas para usar solo las que tienen variación
+        columnas_categoricas_numericas = columnas_con_variacion
+        columnas_para_corr = columnas_categoricas_numericas + ['_Exito_Numerico']
+        
+        # Recrear df_corr solo con variables con variación
+        df_corr = pd.DataFrame()
+        df_corr['_Exito_Numerico'] = df['_Exito_Numerico']
+        for col in columnas_categoricas_numericas:
+            df_corr[col] = df_corr_categoricas[col]
+        
+        print(f"  ✓ Usando {len(columnas_categoricas_numericas)} variables categóricas convertidas con diferentes métodos")
+        
+        # Eliminar filas con demasiados NaN (más del 50% de valores faltantes)
+        umbral_nan = len(columnas_para_corr) * 0.5
+        df_corr = df_corr.dropna(thresh=umbral_nan)
+        
+        if len(df_corr) < 10:
+            return jsonify({
+                'success': False,
+                'error': 'No hay suficientes datos válidos para calcular correlaciones (mínimo 10 proyectos requeridos).'
+            }), 404
+        
+        # Calcular matriz de correlación usando método de Pearson
+        # Usar min_periods para manejar valores faltantes correctamente
+        print(f"  ✓ Calculando matriz de correlación con {len(df_corr)} proyectos y {len(columnas_para_corr)} variables")
+        print(f"  ✓ Valores faltantes por columna:")
+        for col in columnas_para_corr:
+            nulos = df_corr[col].isna().sum()
+            print(f"    - {col}: {nulos} nulos de {len(df_corr)} ({100*nulos/len(df_corr):.1f}%)")
+        
+        # Calcular correlación con min_periods para asegurar suficiente datos
+        matriz_corr = df_corr[columnas_para_corr].corr(method='pearson', min_periods=10)
+        
+        # Verificar que la matriz se calculó correctamente
+        print(f"  ✓ Matriz de correlación calculada: {matriz_corr.shape}")
+        print(f"  ✓ Rango de valores en matriz: {matriz_corr.min().min():.3f} a {matriz_corr.max().max():.3f}")
+        
+        # Obtener correlaciones con _Exito_Numerico
+        if '_Exito_Numerico' not in matriz_corr.columns:
+            return jsonify({
+                'success': False,
+                'error': 'No se pudo calcular la correlación con el éxito del proyecto.'
+            }), 404
+        
+        correlaciones_exito = matriz_corr['_Exito_Numerico'].drop('_Exito_Numerico')
+        
+        # Mostrar algunas correlaciones para debugging
+        print(f"  ✓ Correlaciones con éxito (primeras 10):")
+        for var, corr in correlaciones_exito.head(10).items():
+            print(f"    - {var}: {corr:.3f}")
+        
+        # Ordenar por valor absoluto de correlación (mayor impacto primero)
+        correlaciones_ordenadas = correlaciones_exito.abs().sort_values(ascending=False)
+        
+        # SOLO usar variables categóricas convertidas (las que el usuario quiere ver)
+        # Filtrar para incluir SOLO las variables categóricas que convertimos
+        variables_categoricas_con_corr = [v for v in correlaciones_ordenadas.index if v.endswith('_num')]
+        
+        # Si hay variables categóricas, usar SOLO esas
+        if len(variables_categoricas_con_corr) > 0:
+            # Ordenar las categóricas por su correlación absoluta
+            top_variables = sorted(variables_categoricas_con_corr, 
+                                 key=lambda x: abs(correlaciones_exito[x]), 
+                                 reverse=True)
+            # Tomar todas las categóricas (o máximo 50 si hay muchas)
+            top_variables = top_variables[:50]
+            print(f"  ✓ Usando SOLO variables categóricas: {len(top_variables)} variables")
+        else:
+            # Si no hay categóricas, usar las top numéricas (fallback)
+            top_variables = correlaciones_ordenadas.head(30).index.tolist()
+            print(f"  ⚠ No se encontraron variables categóricas, usando numéricas: {len(top_variables)} variables")
+        
+        print(f"  ✓ Variables seleccionadas para el heatmap: {len(top_variables)}")
+        
+        # Mostrar las primeras 10 para verificación
+        print(f"  ✓ Primeras 10 variables: {top_variables[:10]}")
+        
+        # Crear matriz de correlación solo con las variables seleccionadas + éxito
+        variables_finales = top_variables + ['_Exito_Numerico']
+        matriz_corr_final = matriz_corr.loc[variables_finales, variables_finales]
+        
+        # Convertir a formato JSON
+        # Crear estructura: {variables: [...], matriz: [[...]], correlaciones_exito: {...}}
+        variables_list = [v for v in variables_finales if v != '_Exito_Numerico']
+        variables_list.append('Éxito del Proyecto')  # Renombrar _Exito_Numerico
+        
+        # Matriz de correlación (asegurarse de que la diagonal tenga 1.0)
+        matriz_data = []
+        for i, var1 in enumerate(variables_finales):
+            fila = []
+            for j, var2 in enumerate(variables_finales):
+                if i == j:
+                    # Diagonal: auto-correlación siempre es 1.0
+                    valor = 1.0
+                else:
+                    valor = matriz_corr_final.iloc[i, j]
+                    # Reemplazar NaN con 0.0 (no None) para mejor visualización
+                    if pd.isna(valor):
+                        valor = 0.0
+                fila.append(float(valor))
+            matriz_data.append(fila)
+        
+        print(f"  ✓ Matriz de datos creada: {len(matriz_data)}x{len(matriz_data[0]) if matriz_data else 0}")
+        
+        # Correlaciones individuales con éxito (para mostrar en tooltip)
+        correlaciones_dict = {}
+        for var in top_variables:
+            valor = correlaciones_exito[var]
+            if pd.isna(valor):
+                valor = 0.0
+            correlaciones_dict[var] = float(valor)
+        
+        # Información adicional sobre las variables
+        info_variables = {}
+        for var in top_variables:
+            serie = df_corr[var].dropna()
+            if len(serie) > 0:
+                info_variables[var] = {
+                    'correlacion': float(correlaciones_exito[var]) if not pd.isna(correlaciones_exito[var]) else 0.0,
+                    'promedio': float(serie.mean()) if not pd.isna(serie.mean()) else 0.0,
+                    'mediana': float(serie.median()) if not pd.isna(serie.median()) else 0.0,
+                    'min': float(serie.min()) if not pd.isna(serie.min()) else 0.0,
+                    'max': float(serie.max()) if not pd.isna(serie.max()) else 0.0,
+                    'valores_validos': int(serie.notna().sum())
+                }
+        
+        print(f"  ✓ Matriz de correlación calculada: {len(variables_list)}x{len(variables_list)}")
+        print(f"  ✓ Correlaciones más altas:")
+        top_5 = correlaciones_ordenadas.head(5)
+        for var, corr_abs in top_5.items():
+            corr_real = correlaciones_exito[var]
+            print(f"    - {var}: {corr_real:.3f}")
+        print()
+        
+        # Identificar las características más fuertes y representativas (top 10 por valor absoluto)
+        # Usar SOLO las variables categóricas convertidas (las que están en top_variables)
+        correlaciones_dict_filtrado = {k: v for k, v in correlaciones_dict.items() if k in top_variables}
+        
+        top_caracteristicas_fuertes = sorted(
+            correlaciones_dict_filtrado.items(),
+            key=lambda x: abs(x[1]),
+            reverse=True
+        )[:30]  # Aumentado de 10 a 30 características
+        
+        print(f"  ✓ Top 30 características más fuertes identificadas (de {len(correlaciones_dict_filtrado)} variables categóricas):")
+        for var, corr in top_caracteristicas_fuertes[:10]:  # Mostrar solo las primeras 10 en el log
+            nombre_limpio = var.replace('_num', '') if var.endswith('_num') else var
+            print(f"    - {nombre_limpio}: {corr:.3f}")
+        
+        # Calcular estadísticas de presencia en proyectos exitosos para cada característica
+        # Verificar que df_completo_global existe y tiene datos
+        if df_completo_global is None or len(df_completo_global) == 0:
+            print("  ⚠ df_completo_global no está disponible, usando df_corr para estadísticas")
+            df_para_stats = df_corr.copy()
+        else:
+            df_para_stats = df_completo_global.copy()
+        
+        # Filtrar proyectos exitosos
+        if 'Clasificacion' in df_para_stats.columns:
+            exitosos_completo = df_para_stats[df_para_stats['Clasificacion'] == 'Exitoso'].copy()
+        elif '_Exito_Numerico' in df_para_stats.columns:
+            exitosos_completo = df_para_stats[df_para_stats['_Exito_Numerico'] == 1.0].copy()
+        else:
+            exitosos_completo = df_para_stats.copy()
+        
+        total_exitosos = len(exitosos_completo)
+        print(f"  ✓ Calculando estadísticas de presencia en {total_exitosos} proyectos exitosos...")
+        print(f"  ✓ Columnas disponibles en df_para_stats: {len(df_para_stats.columns)} columnas")
+        if len(df_para_stats.columns) > 0:
+            print(f"  ✓ Primeras 10 columnas: {list(df_para_stats.columns[:10])}")
+        
+        top_caracteristicas_con_stats = []
+        for var, corr in top_caracteristicas_fuertes:
+            nombre_limpio = var.replace('_num', '') if var.endswith('_num') else var
+            variable_original = nombre_limpio  # Nombre sin _num
+            
+            stats = {
+                'porcentaje_presencia': 0.0,
+                'total_proyectos': int(total_exitosos),
+                'proyectos_con_caracteristica': 0,
+                'proyectos_sin_caracteristica': int(total_exitosos),
+                'valores_validos': 0,
+                'metodo': 'sin_datos'
+            }
+            estadisticas_detalladas = {}
+            
+            # Buscar la columna original en el dataframe
+            columna_original = None
+            posibles_columnas = [
+                variable_original,
+                var,
+                variable_original.replace('_', ' '),
+                variable_original.replace(' ', '_')
+            ]
+            posibles_columnas = [col for col in posibles_columnas if col]
+            
+            for candidato in posibles_columnas:
+                if candidato in df_para_stats.columns:
+                    columna_original = candidato
+                    break
+            
+            if columna_original is None:
+                variable_limpia = variable_original.replace(' ', '').replace('_', '').lower()
+                for col in df_para_stats.columns:
+                    col_limpia = str(col).replace(' ', '').replace('_', '').lower()
+                    if col_limpia == variable_limpia or variable_limpia in col_limpia or col_limpia in variable_limpia:
+                        columna_original = col
+                        break
+            
+            if columna_original and columna_original in df_para_stats.columns and total_exitosos > 0:
+                serie_valores = exitosos_completo[columna_original]
+                valores_numericos = pd.to_numeric(serie_valores, errors='coerce')
+                valores_numericos_validos = valores_numericos.dropna()
+                
+                valores_positivos = {'si', 'sí', 'incluido', 'incluida', 'incluye', 'yes', 'true', '1', 'disponible'}
+                valores_negativos = {'no', 'n/a', 'na', 'false', '0', 'ninguno', 'ninguna', 'no aplica'}
+                
+                presencia_conteo = 0
+                
+                if len(valores_numericos_validos) > 0:
+                    valores_unicos = set(np.round(valores_numericos_validos.unique(), 6))
+                    es_binaria_numerica = valores_unicos.issubset({0.0, 1.0}) or valores_unicos.issubset({0, 1})
+                    
+                    if es_binaria_numerica:
+                        presencia_conteo = int((valores_numericos_validos > 0).sum())
+                        stats['metodo'] = 'numerico_binario'
+                    else:
+                        presencia_conteo = int((valores_numericos_validos > 0).sum())
+                        stats['metodo'] = 'numerico_general'
+                    
+                    stats['valores_validos'] = int(len(valores_numericos_validos))
+                    
+                    estadisticas_detalladas = {
+                        'tipo': 'numerica',
+                        'valores_validos': int(len(valores_numericos_validos)),
+                        'promedio': float(valores_numericos_validos.mean()),
+                        'mediana': float(valores_numericos_validos.median()),
+                        'min': float(valores_numericos_validos.min()),
+                        'max': float(valores_numericos_validos.max()),
+                        'percentil_25': float(valores_numericos_validos.quantile(0.25)),
+                        'percentil_75': float(valores_numericos_validos.quantile(0.75)),
+                        'desviacion': float(valores_numericos_validos.std(ddof=0)) if len(valores_numericos_validos) > 1 else 0.0
+                    }
+                else:
+                    valores_str = serie_valores.astype(str).str.strip()
+                    mask_validos = (
+                        serie_valores.notna() &
+                        (valores_str != '') &
+                        (~valores_str.str.lower().isin({'nan', 'none', 'null', 'sin dato', 'sin datos'}))
+                    )
+                    valores_texto = valores_str[mask_validos]
+                    stats['valores_validos'] = int(len(valores_texto))
+                    
+                    if len(valores_texto) > 0:
+                        valores_texto_lower = valores_texto.str.lower()
+                        conjunto_unicos = set(valores_texto_lower.unique())
+                        if conjunto_unicos.issubset(valores_positivos.union(valores_negativos)):
+                            presencia_conteo = int(valores_texto_lower.isin(valores_positivos).sum())
+                            stats['metodo'] = 'texto_binario'
+                        else:
+                            presencia_conteo = int(len(valores_texto))
+                            stats['metodo'] = 'texto_general'
+                            
+                            conteos = valores_texto.value_counts().head(5)
+                            top_valores = []
+                            for valor, conteo in conteos.items():
+                                top_valores.append({
+                                    'valor': str(valor),
+                                    'conteo': int(conteo),
+                                    'porcentaje': float((conteo / total_exitosos) * 100) if total_exitosos else 0.0
+                                })
+                            
+                            estadisticas_detalladas = {
+                                'tipo': 'categorica',
+                                'valores_validos': int(len(valores_texto)),
+                                'valores_distintos': int(valores_texto.nunique()),
+                                'top_valores': top_valores,
+                                'valor_mas_frecuente': str(conteos.idxmax()) if len(conteos) > 0 else None
+                            }
+                
+                stats['proyectos_con_caracteristica'] = int(presencia_conteo)
+                stats['proyectos_sin_caracteristica'] = int(total_exitosos - presencia_conteo)
+                stats['porcentaje_presencia'] = float((presencia_conteo / total_exitosos) * 100) if total_exitosos > 0 else 0.0
+                
+                if stats['metodo'] != 'sin_datos':
+                    print(f"    ✓ {nombre_limpio} ({columna_original}): {stats['porcentaje_presencia']:.1f}% ({stats['proyectos_con_caracteristica']}/{stats['total_proyectos']}) – método: {stats['metodo']}")
+                else:
+                    print(f"    ⚠ {nombre_limpio} ({columna_original}): No se pudo determinar presencia (sin datos suficientes)")
+            else:
+                if columna_original:
+                    print(f"    ⚠ {nombre_limpio}: columna '{columna_original}' no tiene datos válidos")
+                else:
+                    print(f"    ⚠ {nombre_limpio}: columna original no encontrada en dataframe (referencia: {variable_original})")
+            
+            top_caracteristicas_con_stats.append({
+                'variable': nombre_limpio,
+                'variable_original': var,
+                'columna_original': columna_original,
+                'correlacion': float(corr),
+                'abs_correlacion': float(abs(corr)),
+                'estadisticas_presencia': stats,
+                'estadisticas_detalladas': estadisticas_detalladas
+            })
+        
+        return jsonify({
+            'success': True,
+            'variables': variables_list,
+            'matriz': matriz_data,
+            'correlaciones_exito': correlaciones_dict,
+            'info_variables': info_variables,
+            'top_caracteristicas_fuertes': top_caracteristicas_con_stats,
+            'total_proyectos': len(df_corr),
+            'total_variables': len(variables_list)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en /api/correlaciones-exito: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -1296,9 +1927,11 @@ def guardar_clasificacion():
         }), 500
 
 if __name__ == '__main__':
+    # Modo desarrollo local (solo se ejecuta cuando se corre directamente con python app.py)
     import webbrowser
     import threading
     import time
+    import os
     
     print("=" * 70)
     print(" " * 15 + "Aplicación Flask - Mapa de Proyectos")
@@ -1336,6 +1969,7 @@ if __name__ == '__main__':
     browser_thread.start()
     
     try:
+        # En desarrollo local, usar debug mode
         app.run(debug=True, host='127.0.0.1', port=5000, use_reloader=False)
     except OSError as e:
         if "Address already in use" in str(e):
@@ -1349,3 +1983,8 @@ if __name__ == '__main__':
             print("=" * 70)
         else:
             print(f"Error al iniciar el servidor: {e}")
+else:
+    # Modo producción (cuando se ejecuta con gunicorn)
+    # Gunicorn manejará el host y puerto automáticamente
+    # No configuramos nada aquí, solo dejamos que Flask use los valores por defecto
+    pass

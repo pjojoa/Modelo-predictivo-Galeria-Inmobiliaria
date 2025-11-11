@@ -182,6 +182,11 @@ function applyAllFiltersAndRender() {
             if (countEl) countEl.textContent = String(proyectosData.length || 0);
         }
 
+        // Actualizar tabla de vista previa de datos
+        if (typeof updateTable === 'function') {
+            updateTable();
+        }
+
         // Recalcular ranking si aplica
         if (typeof loadRankingConstructores === 'function') {
             // Mantener filtro de estado actual
@@ -5416,6 +5421,8 @@ async function cargarCorrelacionesExito() {
         if (data.success && data.matriz && data.variables) {
             console.log('[cargarCorrelacionesExito] Datos válidos, generando heatmap...');
             generarHeatmapCorrelaciones(data);
+            // Asegurar que el contenedor se muestre
+            container.style.display = 'block';
         } else {
             console.warn('[cargarCorrelacionesExito] No se pudieron cargar las correlaciones:', data.error || 'Error desconocido');
             console.warn('[cargarCorrelacionesExito] data.success:', data.success);
@@ -5452,9 +5459,13 @@ function generarHeatmapCorrelaciones(data) {
     const { variables, matriz, correlaciones_exito, info_variables } = data;
     
     if (!variables || !matriz || variables.length === 0) {
+        console.warn('[generarHeatmapCorrelaciones] No hay datos suficientes para generar el heatmap');
         container.style.display = 'none';
         return;
     }
+    
+    // Asegurar que el contenedor esté visible
+    container.style.display = 'block';
     
     // Función para limpiar nombres de variables (remover sufijo _num si existe)
     function limpiarNombreVariable(nombre) {

@@ -250,6 +250,21 @@
                 <div class="sidebar-tab-content">
                     <!-- Pestaña: Filtros -->
                     <div class="tab-pane active" id="tab-filtros">
+                <!-- Búsqueda por nombre de Proyecto - PRIMERO -->
+                <div class="filter-section">
+                                <label for="proyecto_search" class="filter-label">
+                                    <i class="fas fa-search"></i> Buscar Proyecto
+                                </label>
+                                <div class="search-input-modern">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" id="proyecto_search" class="search-input-control" placeholder="Escribe el nombre del proyecto...">
+                                    <button id="proyecto_search_clear" class="search-clear-btn" title="Limpiar búsqueda" aria-label="Limpiar">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <small id="proyecto_search_info" class="search-info-text-modern">Filtra la tabla y el mapa por nombre.</small>
+                </div>
+
             <div class="filter-section">
                             <label for="clasificacion" class="filter-label">
                                 <i class="fas fa-tags"></i> Clasificación
@@ -325,21 +340,6 @@
                                     <i class="fas fa-times"></i> Limpiar
                                 </button>
                             </div>
-                </div>
-
-                <!-- Búsqueda por nombre de Proyecto -->
-                <div class="filter-section">
-                                <label for="proyecto_search" class="filter-label">
-                                    <i class="fas fa-search"></i> Buscar Proyecto
-                                </label>
-                                <div class="search-input-modern">
-                                    <i class="fas fa-search"></i>
-                                    <input type="text" id="proyecto_search" class="search-input-control" placeholder="Escribe el nombre del proyecto...">
-                                    <button id="proyecto_search_clear" class="search-clear-btn" title="Limpiar búsqueda" aria-label="Limpiar">
-                                        <i class="fas fa-times"></i>
-                                    </button>
-                                </div>
-                                <small id="proyecto_search_info" class="search-info-text-modern">Filtra la tabla y el mapa por nombre.</small>
                 </div>
 
                 <!-- Rango de Área (m²) con decimales -->
