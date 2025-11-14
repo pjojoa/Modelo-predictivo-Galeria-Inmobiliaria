@@ -1,5 +1,5 @@
 """
-Aplicación Web Flask - Mapa Interactivo de Proyectos Inmobiliarios
+Aplicación Web Flask - GeoMapval Proyectos Inmobiliarios
 Sistema moderno sin dependencia de Streamlit usando Flask + Leaflet
 """
 
@@ -1921,6 +1921,650 @@ def guardar_clasificacion():
                 'error': 'No se pudo guardar el archivo'
             }), 500
     except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+def generar_contexto_proyectos(df):
+    """
+    Genera un contexto estructurado con información de los proyectos para el chat.
+    Incluye resumen estadístico, información sobre columnas disponibles y datos de proyectos.
+    """
+    if df.empty:
+        return "No hay datos de proyectos disponibles."
+    
+    context_parts = []
+    
+    # Inicializar variables de columnas de vendedor/constructor
+    col_vende = None
+    col_constructor = None
+    
+    # 0. Información sobre el dataset completo
+    total = len(df)
+    total_columnas = len(df.columns)
+    context_parts.append(f"DATASET COMPLETO DE PROYECTOS:")
+    context_parts.append(f"- Total de proyectos: {total}")
+    context_parts.append(f"- Total de columnas disponibles: {total_columnas}")
+    
+    # Lista de columnas principales disponibles
+    columnas_principales = [
+        'Codigo_Proyecto', 'Proyecto', 'Clasificacion', 'Score_Exito', 'Score_Compuesto',
+        'Zona', 'Barrio', 'Estrato', 'Precio_Promedio', 'Area_Promedio',
+        'Unidades_Vendidas', 'Unidades_Disponibles', 'Velocidad_Ventas', 'Meses_Para_Agotar',
+        'Patron_Ventas', 'Tipo_VIS_Principal', 'Vende', 'Constructor', 'Ciudad',
+        'Coordenadas Reales', 'Lat', 'Lon'
+    ]
+    columnas_disponibles = [col for col in columnas_principales if col in df.columns]
+    context_parts.append(f"\nCOLUMNAS PRINCIPALES DISPONIBLES ({len(columnas_disponibles)}):")
+    context_parts.append(", ".join(columnas_disponibles[:15]))
+    if len(columnas_disponibles) > 15:
+        context_parts.append(f"... y {len(columnas_disponibles) - 15} columnas más")
+    
+    # Lista de TODAS las columnas disponibles (compacta)
+    todas_columnas = list(df.columns)
+    context_parts.append(f"\nTODAS LAS COLUMNAS DISPONIBLES ({len(todas_columnas)}):")
+    # Agrupar en líneas de 5 columnas
+    for i in range(0, min(len(todas_columnas), 50), 5):  # Mostrar primeras 50
+        grupo = todas_columnas[i:i+5]
+        context_parts.append(", ".join(grupo))
+    if len(todas_columnas) > 50:
+        context_parts.append(f"... y {len(todas_columnas) - 50} columnas más")
+    
+    # 1. Resumen estadístico general
+    if 'Clasificacion' in df.columns:
+        exitosos = len(df[df['Clasificacion'] == 'Exitoso'])
+        moderados = len(df[df['Clasificacion'] == 'Moderado'])
+        mejorables = len(df[df['Clasificacion'] == 'Mejorable'])
+        context_parts.append(f"\nRESUMEN POR CLASIFICACIÓN:")
+        context_parts.append(f"- Exitosos: {exitosos} ({exitosos/total*100:.1f}%)")
+        context_parts.append(f"- Moderados: {moderados} ({moderados/total*100:.1f}%)")
+        context_parts.append(f"- Mejorables: {mejorables} ({mejorables/total*100:.1f}%)")
+    
+    # 2. Información por zona
+    if 'Zona' in df.columns:
+        zonas = df['Zona'].value_counts()
+        context_parts.append(f"\nPROYECTOS POR ZONA (Todas las zonas):")
+        for zona, count in zonas.items():
+            if pd.notna(zona) and str(zona).strip() not in ('', 'N/A'):
+                porcentaje = (count / total) * 100
+                context_parts.append(f"- {zona}: {count} proyectos ({porcentaje:.1f}%)")
+    
+    # 3. Estadísticas de precios
+    if 'Precio_Promedio' in df.columns:
+        precios_validos = df['Precio_Promedio'].dropna()
+        if len(precios_validos) > 0:
+            precio_min = precios_validos.min()
+            precio_max = precios_validos.max()
+            precio_prom = precios_validos.mean()
+            precio_mediana = precios_validos.median()
+            context_parts.append(f"\nESTADÍSTICAS DE PRECIOS:")
+            context_parts.append(f"- Precio mínimo: ${precio_min:,.0f}")
+            context_parts.append(f"- Precio máximo: ${precio_max:,.0f}")
+            context_parts.append(f"- Precio promedio: ${precio_prom:,.0f}")
+            context_parts.append(f"- Precio mediana: ${precio_mediana:,.0f}")
+    
+    # 4. Estadísticas de áreas
+    if 'Area_Promedio' in df.columns:
+        areas_validas = df['Area_Promedio'].dropna()
+        if len(areas_validas) > 0:
+            context_parts.append(f"\nESTADÍSTICAS DE ÁREAS:")
+            context_parts.append(f"- Área mínima: {areas_validas.min():.1f} m²")
+            context_parts.append(f"- Área máxima: {areas_validas.max():.1f} m²")
+            context_parts.append(f"- Área promedio: {areas_validas.mean():.1f} m²")
+    
+    # 4.5. Estadísticas por Constructor/Vendedor
+    # Buscar columna de vendedor/constructor (ya inicializadas arriba)
+    if 'Vende' in df.columns:
+        col_vende = 'Vende'
+    else:
+        for col in df.columns:
+            if col.lower() == 'vende' or (col.lower().startswith('vende') and 'vende' in col.lower()):
+                col_vende = col
+                break
+    
+    if 'Constructor' in df.columns:
+        col_constructor = 'Constructor'
+    else:
+        for col in df.columns:
+            if 'constructor' in col.lower() or 'constructora' in col.lower():
+                col_constructor = col
+                break
+    
+    # Estadísticas por Vendedor (columna Vende)
+    if col_vende and col_vende in df.columns:
+        df_vende = df[df[col_vende].notna()].copy()
+        df_vende = df_vende[df_vende[col_vende].astype(str).str.strip() != '']
+        df_vende = df_vende[~df_vende[col_vende].astype(str).str.lower().isin(['nan', 'none', 'n/a', ''])]
+        
+        if not df_vende.empty:
+            vendedores = df_vende[col_vende].value_counts()
+            context_parts.append(f"\nPROYECTOS POR VENDEDOR/CONSTRUCTORA (columna '{col_vende}'):")
+            context_parts.append(f"Total de vendedores/constructoras únicos: {len(vendedores)}")
+            
+            # Mostrar todos los vendedores con sus conteos
+            for vendedor, count in vendedores.items():
+                vendedor_nombre = str(vendedor).strip()
+                # Limpiar formato
+                if vendedor_nombre.endswith('.0') and vendedor_nombre.replace('.0', '').replace('-', '').isdigit():
+                    vendedor_nombre = vendedor_nombre.rstrip('.0')
+                if vendedor_nombre.replace('-', '').isdigit():
+                    vendedor_nombre = f"Vendedor #{vendedor_nombre}"
+                
+                porcentaje = (count / total) * 100
+                # Contar clasificaciones por vendedor
+                vendedor_df = df_vende[df_vende[col_vende] == vendedor]
+                exitosos = len(vendedor_df[vendedor_df['Clasificacion'] == 'Exitoso']) if 'Clasificacion' in vendedor_df.columns else 0
+                moderados = len(vendedor_df[vendedor_df['Clasificacion'] == 'Moderado']) if 'Clasificacion' in vendedor_df.columns else 0
+                mejorables = len(vendedor_df[vendedor_df['Clasificacion'] == 'Mejorable']) if 'Clasificacion' in vendedor_df.columns else 0
+                
+                context_parts.append(
+                    f"- {vendedor_nombre}: {count} proyectos ({porcentaje:.1f}%) - "
+                    f"Exitosos: {exitosos}, Moderados: {moderados}, Mejorables: {mejorables}"
+                )
+    
+    # Estadísticas por Constructor (si es diferente de Vende)
+    if col_constructor and col_constructor in df.columns and col_constructor != col_vende:
+        df_constructor = df[df[col_constructor].notna()].copy()
+        df_constructor = df_constructor[df_constructor[col_constructor].astype(str).str.strip() != '']
+        df_constructor = df_constructor[~df_constructor[col_constructor].astype(str).str.lower().isin(['nan', 'none', 'n/a', ''])]
+        
+        if not df_constructor.empty:
+            constructores = df_constructor[col_constructor].value_counts()
+            context_parts.append(f"\nPROYECTOS POR CONSTRUCTOR (columna '{col_constructor}'):")
+            context_parts.append(f"Total de constructores únicos: {len(constructores)}")
+            
+            # Mostrar todos los constructores con sus conteos
+            for constructor, count in constructores.items():
+                constructor_nombre = str(constructor).strip()
+                # Limpiar formato
+                if constructor_nombre.endswith('.0') and constructor_nombre.replace('.0', '').replace('-', '').isdigit():
+                    constructor_nombre = constructor_nombre.rstrip('.0')
+                if constructor_nombre.replace('-', '').isdigit():
+                    constructor_nombre = f"Constructor #{constructor_nombre}"
+                
+                porcentaje = (count / total) * 100
+                context_parts.append(f"- {constructor_nombre}: {count} proyectos ({porcentaje:.1f}%)")
+    
+    # 5. Lista completa de TODOS los proyectos (formato compacto para búsqueda)
+    # Limitar a 200 proyectos más importantes para no exceder límites de tokens
+    context_parts.append(f"\nLISTA DE PROYECTOS (muestra de {min(200, total)} proyectos más relevantes):")
+    context_parts.append("Formato: Código | Nombre | Clasificación | Zona | Barrio | Precio | Unidades V/D | Vendedor")
+    
+    # Priorizar proyectos con más información (exitosos primero, luego por score)
+    df_ordenado = df.copy()
+    if 'Score_Exito' in df_ordenado.columns:
+        df_ordenado = df_ordenado.sort_values('Score_Exito', ascending=False, na_last=True)
+    
+    # Mostrar proyectos en formato compacto (máximo 200 para no exceder límites)
+    muestra_proyectos = df_ordenado.head(200)
+    for idx, row in muestra_proyectos.iterrows():
+        proyecto = str(row.get('Proyecto', 'N/A'))[:35]
+        codigo = str(row.get('Codigo_Proyecto', 'N/A'))[:12]
+        clasificacion = str(row.get('Clasificacion', 'N/A'))[:10]
+        zona = str(row.get('Zona', 'N/A'))[:12]
+        barrio = str(row.get('Barrio', 'N/A'))[:15]
+        precio = row.get('Precio_Promedio', 0)
+        precio_str = f"${precio/1e6:.1f}M" if pd.notna(precio) and precio > 0 else "N/A"
+        unidades_vendidas = int(row.get('Unidades_Vendidas', 0)) if pd.notna(row.get('Unidades_Vendidas')) else 0
+        unidades_disponibles = int(row.get('Unidades_Disponibles', 0)) if pd.notna(row.get('Unidades_Disponibles')) else 0
+        
+        # Obtener vendedor/constructor
+        vendedor_str = "N/A"
+        if col_vende and col_vende in row:
+            vende_val = row.get(col_vende)
+            if pd.notna(vende_val) and str(vende_val).strip() not in ('', 'nan', 'none', 'N/A'):
+                vendedor_str = str(vende_val).strip()[:20]
+        elif col_constructor and col_constructor in row:
+            constructor_val = row.get(col_constructor)
+            if pd.notna(constructor_val) and str(constructor_val).strip() not in ('', 'nan', 'none', 'N/A'):
+                vendedor_str = str(constructor_val).strip()[:20]
+        
+        # Formato compacto: código|nombre|clasificación|zona|barrio|precio|vendidas/disponibles|vendedor
+        context_parts.append(
+            f"{codigo}|{proyecto}|{clasificacion}|{zona}|{barrio}|{precio_str}|{unidades_vendidas}/{unidades_disponibles}|{vendedor_str}"
+        )
+    
+    if total > 200:
+        context_parts.append(f"\n... y {total - 200} proyectos más (total: {total} proyectos)")
+        context_parts.append(f"NOTA: Tienes acceso a TODOS los {total} proyectos. Si necesitas información de un proyecto específico que no aparece aquí, puedes buscarlo por nombre o código.")
+    
+    return "\n".join(context_parts)
+
+@app.route('/api/chat', methods=['POST'])
+def chat_gemini():
+    """
+    API para chat con Gemini AI.
+    Conecta el widget de chat con Google Gemini API para análisis de datos geoespaciales.
+    Incluye el contexto completo de los proyectos en el dataset.
+    """
+    try:
+        import google.generativeai as genai
+        from dotenv import load_dotenv
+        
+        # Cargar variables de entorno
+        load_dotenv()
+        
+        # Obtener API key de Gemini
+        gemini_api_key = os.getenv('GEMINI_API_KEY', 'AIzaSyCBeurnd1ylLJ0xM5WIECMVdMOtpnr4TjM')
+        
+        if not gemini_api_key:
+            return jsonify({
+                'success': False,
+                'error': 'API key de Gemini no configurada'
+            }), 500
+        
+        # Configurar Gemini
+        genai.configure(api_key=gemini_api_key)
+        
+        # Obtener mensaje del usuario
+        data = request.get_json()
+        if not data or 'message' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'El campo "message" es requerido'
+            }), 400
+        
+        user_message = data.get('message', '').strip()
+        if not user_message:
+            return jsonify({
+                'success': False,
+                'error': 'El mensaje no puede estar vacío'
+            }), 400
+        
+        # Modelo a usar (gemini-2.0-flash-exp es rápido y gratuito)
+        model_name = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash-exp')
+        
+        # Detectar si el usuario está preguntando por un proyecto específico o constructor
+        buscar_proyecto_especifico = False
+        proyecto_buscado = None
+        buscar_constructor = False
+        constructor_buscado = None
+        
+        # Palabras clave que indican búsqueda de proyecto específico
+        palabras_busqueda = ['proyecto', 'información sobre', 'datos de', 'detalles de', 'código', 'nombre']
+        # Palabras clave que indican búsqueda de constructor/vendedor
+        palabras_constructor = ['constructor', 'constructora', 'vendedor', 'marval', 'cuántos proyectos tiene', 'proyectos de']
+        
+        user_lower = user_message.lower()
+        
+        # Detectar búsqueda de constructor/vendedor
+        for palabra in palabras_constructor:
+            if palabra in user_lower:
+                buscar_constructor = True
+                # Intentar extraer el nombre del constructor
+                if palabra in ['cuántos proyectos tiene', 'proyectos de']:
+                    partes = user_message.split(palabra, 1)
+                    if len(partes) > 1:
+                        constructor_buscado = partes[1].strip().strip('?').strip('.').strip()
+                elif palabra in ['marval']:
+                    constructor_buscado = palabra
+                break
+        
+        # Intentar extraer nombre de proyecto del mensaje
+        if not buscar_constructor:
+            for palabra in palabras_busqueda:
+                if palabra in user_lower:
+                    buscar_proyecto_especifico = True
+                    # Intentar extraer el nombre del proyecto (texto después de la palabra clave)
+                    partes = user_message.split(palabra, 1)
+                    if len(partes) > 1:
+                        proyecto_buscado = partes[1].strip().strip('?').strip('.').strip()
+                    break
+        
+            # Generar contexto completo de proyectos
+            contexto_proyectos = ""
+            if not df_data.empty:
+                print("  [INFO] Generando contexto de proyectos para el chat...")
+                
+                # Si se busca un constructor/vendedor específico, agregar información adicional
+                if buscar_constructor and constructor_buscado:
+                    print(f"  [INFO] Búsqueda de constructor/vendedor: '{constructor_buscado}'")
+                    # Buscar proyectos del constructor
+                    proyectos_constructor = None
+                    if 'Vende' in df_data.columns:
+                        mask = df_data['Vende'].astype(str).str.contains(
+                            constructor_buscado, case=False, na=False, regex=False
+                        )
+                        proyectos_constructor = df_data[mask]
+                    elif 'Constructor' in df_data.columns:
+                        mask = df_data['Constructor'].astype(str).str.contains(
+                            constructor_buscado, case=False, na=False, regex=False
+                        )
+                        proyectos_constructor = df_data[mask]
+                    
+                    if proyectos_constructor is not None and not proyectos_constructor.empty:
+                        print(f"  [OK] Encontrados {len(proyectos_constructor)} proyectos del constructor")
+                        # Generar contexto general primero
+                        contexto_proyectos = generar_contexto_proyectos(df_data)
+                        # Agregar información detallada del constructor
+                        contexto_proyectos += f"\n\nINFORMACIÓN ESPECÍFICA DEL CONSTRUCTOR/VENDEDOR '{constructor_buscado}':\n"
+                        contexto_proyectos += f"Total de proyectos: {len(proyectos_constructor)}\n"
+                        
+                        # Estadísticas del constructor
+                        if 'Clasificacion' in proyectos_constructor.columns:
+                            exitosos = len(proyectos_constructor[proyectos_constructor['Clasificacion'] == 'Exitoso'])
+                            moderados = len(proyectos_constructor[proyectos_constructor['Clasificacion'] == 'Moderado'])
+                            mejorables = len(proyectos_constructor[proyectos_constructor['Clasificacion'] == 'Mejorable'])
+                            contexto_proyectos += f"Clasificación: Exitosos: {exitosos}, Moderados: {moderados}, Mejorables: {mejorables}\n"
+                        
+                        # Lista de proyectos del constructor
+                        contexto_proyectos += f"\nProyectos del constructor:\n"
+                        for idx, row in proyectos_constructor.iterrows():
+                            proyecto = str(row.get('Proyecto', 'N/A'))
+                            codigo = str(row.get('Codigo_Proyecto', 'N/A'))
+                            clasificacion = str(row.get('Clasificacion', 'N/A'))
+                            zona = str(row.get('Zona', 'N/A'))
+                            precio = row.get('Precio_Promedio', 0)
+                            precio_str = f"${precio:,.0f}" if pd.notna(precio) and precio > 0 else "N/A"
+                            contexto_proyectos += f"- {proyecto} (Código: {codigo}, Clasificación: {clasificacion}, Zona: {zona}, Precio: {precio_str})\n"
+                    else:
+                        print(f"  [ADV] Constructor no encontrado exactamente, usando contexto general")
+                        contexto_proyectos = generar_contexto_proyectos(df_data)
+                # Si se busca un proyecto específico, incluirlo en el contexto
+                elif buscar_proyecto_especifico and proyecto_buscado:
+                    print(f"  [INFO] Búsqueda de proyecto específico: '{proyecto_buscado}'")
+                    # Buscar proyecto por nombre o código
+                    proyecto_encontrado = None
+                    
+                    # Buscar por nombre (parcial)
+                    if 'Proyecto' in df_data.columns:
+                        mask_nombre = df_data['Proyecto'].astype(str).str.contains(
+                            proyecto_buscado, case=False, na=False, regex=False
+                        )
+                        proyectos_coincidentes = df_data[mask_nombre]
+                        if not proyectos_coincidentes.empty:
+                            proyecto_encontrado = proyectos_coincidentes.iloc[0]
+                    
+                    # Si no se encontró por nombre, buscar por código
+                    if proyecto_encontrado is None and 'Codigo_Proyecto' in df_data.columns:
+                        try:
+                            codigo_buscado = str(proyecto_buscado).strip()
+                            mask_codigo = df_data['Codigo_Proyecto'].astype(str).str.contains(
+                                codigo_buscado, case=False, na=False, regex=False
+                            )
+                            proyectos_coincidentes = df_data[mask_codigo]
+                            if not proyectos_coincidentes.empty:
+                                proyecto_encontrado = proyectos_coincidentes.iloc[0]
+                        except:
+                            pass
+                    
+                    # Si se encontró el proyecto, agregarlo al contexto
+                    if proyecto_encontrado is not None:
+                        print(f"  [OK] Proyecto encontrado: {proyecto_encontrado.get('Proyecto', 'N/A')}")
+                        contexto_proyectos = generar_contexto_proyectos(df_data)
+                        # Agregar información detallada del proyecto encontrado
+                        contexto_proyectos += f"\n\nPROYECTO ESPECÍFICO SOLICITADO:\n"
+                        contexto_proyectos += f"Nombre: {proyecto_encontrado.get('Proyecto', 'N/A')}\n"
+                        contexto_proyectos += f"Código: {proyecto_encontrado.get('Codigo_Proyecto', 'N/A')}\n"
+                        contexto_proyectos += f"Clasificación: {proyecto_encontrado.get('Clasificacion', 'N/A')}\n"
+                        contexto_proyectos += f"Zona: {proyecto_encontrado.get('Zona', 'N/A')}\n"
+                        contexto_proyectos += f"Barrio: {proyecto_encontrado.get('Barrio', 'N/A')}\n"
+                        if pd.notna(proyecto_encontrado.get('Estrato')):
+                            contexto_proyectos += f"Estrato: {proyecto_encontrado.get('Estrato', 'N/A')}\n"
+                        if pd.notna(proyecto_encontrado.get('Precio_Promedio')) and proyecto_encontrado.get('Precio_Promedio', 0) > 0:
+                            contexto_proyectos += f"Precio promedio: ${proyecto_encontrado.get('Precio_Promedio', 0):,.0f}\n"
+                        if pd.notna(proyecto_encontrado.get('Area_Promedio')) and proyecto_encontrado.get('Area_Promedio', 0) > 0:
+                            contexto_proyectos += f"Área promedio: {proyecto_encontrado.get('Area_Promedio', 0):.1f} m²\n"
+                        contexto_proyectos += f"Unidades vendidas: {int(proyecto_encontrado.get('Unidades_Vendidas', 0))}\n"
+                        contexto_proyectos += f"Unidades disponibles: {int(proyecto_encontrado.get('Unidades_Disponibles', 0))}\n"
+                        if pd.notna(proyecto_encontrado.get('Score_Exito')):
+                            contexto_proyectos += f"Score de éxito: {proyecto_encontrado.get('Score_Exito', 0):.3f}\n"
+                        if pd.notna(proyecto_encontrado.get('Velocidad_Ventas')):
+                            contexto_proyectos += f"Velocidad de ventas: {proyecto_encontrado.get('Velocidad_Ventas', 0):.2f} unidades/mes\n"
+                        if pd.notna(proyecto_encontrado.get('Patron_Ventas')):
+                            contexto_proyectos += f"Patrón de ventas: {proyecto_encontrado.get('Patron_Ventas', 'N/A')}\n"
+                    else:
+                        print(f"  [ADV] Proyecto no encontrado exactamente, usando contexto general")
+                        contexto_proyectos = generar_contexto_proyectos(df_data)
+                else:
+                    contexto_proyectos = generar_contexto_proyectos(df_data)
+            
+            print(f"  [OK] Contexto generado: {len(contexto_proyectos)} caracteres")
+        
+        # Crear contexto del sistema con información sobre GeoMapval
+        system_instruction = f"""Eres GeoMapval Assistant, un asistente especializado en análisis geoespacial e inmobiliario con acceso COMPLETO a todos los datos del modelo.
+
+Tu función es ayudar a los usuarios a:
+- Analizar proyectos inmobiliarios en Cali, Colombia
+- Buscar información sobre CUALQUIER proyecto específico por nombre, código, zona, barrio, etc.
+- Filtrar y analizar proyectos por múltiples criterios (zona, barrio, estrato, precio, clasificación, etc.)
+- Entender clasificaciones de proyectos (Exitosos, Moderados, Mejorables)
+- Interpretar datos geoespaciales y métricas de proyectos
+- Responder preguntas sobre el sistema de clasificación
+- Proporcionar insights sobre el mercado inmobiliario
+- Comparar proyectos entre sí
+- Hacer análisis estadísticos y consultas complejas sobre los datos
+
+Contexto de la plataforma:
+- GeoMapval es una plataforma de análisis de proyectos inmobiliarios
+- Los proyectos se clasifican automáticamente según velocidad de ventas, porcentaje vendido, tamaño, precio, etc.
+- Tienes acceso a TODAS las columnas y filas del dataset completo ({len(df_data)} proyectos, {len(df_data.columns) if not df_data.empty else 0} columnas)
+
+INSTRUCCIONES IMPORTANTES:
+- Tienes acceso COMPLETO a información detallada de TODOS los {len(df_data)} proyectos en el dataset
+- El dataset incluye {len(df_data.columns) if not df_data.empty else 0} columnas con información completa de cada proyecto
+- Cuando el usuario pregunte por un proyecto específico, busca en la LISTA DE PROYECTOS proporcionada
+- Si encuentras el proyecto, proporciona TODA la información disponible (nombre, código, clasificación, zona, barrio, precio, unidades, score, vendedor/constructor, y cualquier otra columna relevante)
+- Si el usuario pregunta por filtros o análisis, usa la información completa del dataset para responder
+- Puedes hacer comparaciones entre proyectos, análisis por zona, barrio, clasificación, precio, área, constructor/vendedor, etc.
+- Puedes contar, sumar, promediar, encontrar mínimos/máximos sobre cualquier columna del dataset
+- IMPORTANTE: Si el usuario pregunta sobre una constructora o vendedor específico (ej: "Marval", "cuántos proyectos tiene X"), busca en la sección "PROYECTOS POR VENDEDOR/CONSTRUCTORA" del contexto
+- La información de constructores/vendedores está disponible en las columnas "Vende" y/o "Constructor"
+- Responde siempre en español de manera clara, profesional y útil
+- Si no tienes información suficiente sobre algo específico, indícalo honestamente
+
+FILTROS DEL MAPA:
+Cuando el usuario quiera filtrar datos en el mapa, explícale que puede usar los siguientes filtros disponibles en el panel lateral:
+- Clasificación: Exitoso, Moderado, Mejorable, Todos
+- Zona: Todas las zonas disponibles (Sur, Norte, Oeste, etc.)
+- Barrio: Cualquier barrio específico
+- Tipo VIS: Vis, No Vis, Vis Renov., etc.
+- Rango de precio: Precio mínimo y máximo
+- Estado: Activos (con unidades disponibles) o Inactivos (sin unidades disponibles)
+- Vendedor: Filtro por vendedor/constructor
+
+Puedes sugerir filtros específicos basándote en la pregunta del usuario. Por ejemplo:
+- "Para ver proyectos exitosos en la zona Sur, usa el filtro de Clasificación: Exitoso y Zona: Sur"
+- "Para proyectos entre $50M y $100M, ajusta el rango de precio en los filtros"
+
+DATOS COMPLETOS DE PROYECTOS DISPONIBLES:
+{contexto_proyectos}
+
+IMPORTANTE: Tienes acceso a TODOS los proyectos y TODAS las columnas. Usa esta información completa para responder las preguntas del usuario de manera precisa y detallada."""
+        
+        # Crear el modelo con instrucciones del sistema
+        model = genai.GenerativeModel(
+            model_name=model_name,
+            system_instruction=system_instruction
+        )
+        
+        # Construir prompt completo (solo el mensaje del usuario, el contexto ya está en system_instruction)
+        full_prompt = user_message
+        
+        # Generar respuesta
+        response = model.generate_content(
+            full_prompt,
+            generation_config={
+                'temperature': 0.7,
+                'top_p': 0.95,
+                'top_k': 40,
+                'max_output_tokens': 2048,  # Aumentado para respuestas más detalladas
+            }
+        )
+        
+        # Extraer texto de la respuesta
+        if response and response.text:
+            response_text = response.text.strip()
+        else:
+            response_text = "Lo siento, no pude generar una respuesta. Por favor, intenta reformular tu pregunta."
+        
+        return jsonify({
+            'success': True,
+            'response': response_text,
+            'message': response_text  # Compatibilidad con diferentes formatos
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en /api/chat: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        # Mensaje de error amigable
+        error_message = "Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta nuevamente."
+        
+        # Si es un error específico de API, dar más detalles
+        if 'API key' in str(e) or 'authentication' in str(e).lower():
+            error_message = "Error de autenticación con la API de Gemini. Verifica la configuración."
+        elif 'quota' in str(e).lower() or 'limit' in str(e).lower():
+            error_message = "Se ha alcanzado el límite de solicitudes. Por favor, intenta más tarde."
+        
+        return jsonify({
+            'success': False,
+            'error': error_message,
+            'response': error_message  # Para que el widget lo muestre
+        }), 500
+
+@app.route('/api/buscar-proyectos', methods=['POST'])
+def buscar_proyectos():
+    """
+    API para búsqueda avanzada de proyectos.
+    Permite al asistente hacer consultas específicas sobre los datos.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Se requiere un objeto JSON con criterios de búsqueda'
+            }), 400
+        
+        if df_data.empty:
+            return jsonify({
+                'success': False,
+                'error': 'No hay datos disponibles'
+            }), 404
+        
+        # Aplicar filtros
+        df_resultado = df_data.copy()
+        
+        # Filtro por nombre de proyecto (búsqueda parcial)
+        if 'nombre' in data and data['nombre']:
+            nombre_buscado = str(data['nombre']).strip()
+            if 'Proyecto' in df_resultado.columns:
+                mask = df_resultado['Proyecto'].astype(str).str.contains(
+                    nombre_buscado, case=False, na=False, regex=False
+                )
+                df_resultado = df_resultado[mask]
+        
+        # Filtro por código
+        if 'codigo' in data and data['codigo']:
+            codigo_buscado = str(data['codigo']).strip()
+            if 'Codigo_Proyecto' in df_resultado.columns:
+                mask = df_resultado['Codigo_Proyecto'].astype(str).str.contains(
+                    codigo_buscado, case=False, na=False, regex=False
+                )
+                df_resultado = df_resultado[mask]
+        
+        # Filtro por zona
+        if 'zona' in data and data['zona']:
+            zona_buscada = str(data['zona']).strip()
+            if 'Zona' in df_resultado.columns:
+                df_resultado = df_resultado[df_resultado['Zona'] == zona_buscada]
+        
+        # Filtro por barrio
+        if 'barrio' in data and data['barrio']:
+            barrio_buscado = str(data['barrio']).strip()
+            if 'Barrio' in df_resultado.columns:
+                df_resultado = df_resultado[df_resultado['Barrio'] == barrio_buscado]
+        
+        # Filtro por clasificación
+        if 'clasificacion' in data and data['clasificacion']:
+            clasificacion_buscada = str(data['clasificacion']).strip()
+            if 'Clasificacion' in df_resultado.columns:
+                df_resultado = df_resultado[df_resultado['Clasificacion'] == clasificacion_buscada]
+        
+        # Filtro por rango de precio
+        if 'precio_min' in data and data['precio_min']:
+            try:
+                precio_min = float(data['precio_min'])
+                if 'Precio_Promedio' in df_resultado.columns:
+                    df_resultado = df_resultado[df_resultado['Precio_Promedio'] >= precio_min]
+            except (ValueError, TypeError):
+                pass
+        
+        if 'precio_max' in data and data['precio_max']:
+            try:
+                precio_max = float(data['precio_max'])
+                if 'Precio_Promedio' in df_resultado.columns:
+                    df_resultado = df_resultado[df_resultado['Precio_Promedio'] <= precio_max]
+            except (ValueError, TypeError):
+                pass
+        
+        # Filtro por vendedor/constructor
+        if 'vendedor' in data and data['vendedor']:
+            vendedor_buscado = str(data['vendedor']).strip()
+            # Buscar en columna Vende
+            if 'Vende' in df_resultado.columns:
+                mask = df_resultado['Vende'].astype(str).str.contains(
+                    vendedor_buscado, case=False, na=False, regex=False
+                )
+                df_resultado = df_resultado[mask]
+            # También buscar en columna Constructor si existe
+            elif 'Constructor' in df_resultado.columns:
+                mask = df_resultado['Constructor'].astype(str).str.contains(
+                    vendedor_buscado, case=False, na=False, regex=False
+                )
+                df_resultado = df_resultado[mask]
+        
+        # Filtro por constructor (si es diferente de vendedor)
+        if 'constructor' in data and data['constructor']:
+            constructor_buscado = str(data['constructor']).strip()
+            if 'Constructor' in df_resultado.columns:
+                mask = df_resultado['Constructor'].astype(str).str.contains(
+                    constructor_buscado, case=False, na=False, regex=False
+                )
+                df_resultado = df_resultado[mask]
+        
+        # Limitar número de resultados
+        limite = data.get('limite', 50)
+        if limite and isinstance(limite, int) and limite > 0:
+            limite = min(limite, 500)  # Máximo 500 resultados
+            df_resultado = df_resultado.head(limite)
+        
+        # Convertir a formato JSON
+        proyectos = []
+        for idx, row in df_resultado.iterrows():
+            proyecto_dict = {}
+            # Incluir todas las columnas
+            for col in df_resultado.columns:
+                valor = row.get(col)
+                # Convertir tipos problemáticos para JSON
+                if pd.isna(valor):
+                    proyecto_dict[col] = None
+                elif isinstance(valor, (np.integer, np.floating)):
+                    if isinstance(valor, np.integer):
+                        proyecto_dict[col] = int(valor)
+                    else:
+                        proyecto_dict[col] = None if np.isnan(valor) else float(valor)
+                elif isinstance(valor, pd.Timestamp):
+                    proyecto_dict[col] = str(valor)
+                else:
+                    proyecto_dict[col] = str(valor) if valor is not None else None
+            proyectos.append(proyecto_dict)
+        
+        return jsonify({
+            'success': True,
+            'total': len(proyectos),
+            'proyectos': proyectos,
+            'columnas': list(df_resultado.columns),
+            'total_columnas': len(df_resultado.columns)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en /api/buscar-proyectos: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)

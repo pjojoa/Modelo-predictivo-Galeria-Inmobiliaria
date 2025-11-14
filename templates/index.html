@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa de Proyectos Inmobiliarios - Cali</title>
+    <title>GeoMapval Proyectos Inmobiliarios - Cali</title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -20,6 +20,8 @@
     <!-- CSS personalizado -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/sidebar-modern.css') }}">
+    <!-- GeoMapval Chat Widget -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/geomapval-chat.css') }}">
 </head>
 <body>
     <!-- Backdrop del panel -->
@@ -33,7 +35,7 @@
     <!-- Header -->
     <header class="main-header">
         <div class="container">
-            <h1><i class="fas fa-map-marked-alt"></i> Mapa Interactivo de Proyectos Inmobiliarios</h1>
+            <h1><i class="fas fa-map-marked-alt"></i> GeoMapval Proyectos Inmobiliarios</h1>
             <p><i class="fas fa-map-marker-alt"></i> Cali, Colombia</p>
         </div>
         <!-- Botón de información sobre clasificación -->
@@ -954,6 +956,90 @@
                 console.error('[TEST] ERROR: No se encontraron elementos necesarios');
             }
         });
+    </script>
+    <!-- GeoMapval Chat Widget -->
+    <script src="{{ url_for('static', filename='js/geomapval-chat.js') }}"></script>
+    <script>
+        // Inicializar el chat widget cuando la página esté lista
+        // Conectado con el backend de GeoMapval/Gemini API
+        (function() {
+            function initChatWidget() {
+                // Esperar un momento para asegurar que el script se cargó
+                setTimeout(function() {
+                    // Verificar que la clase esté disponible
+                    if (typeof GeoMapvalChatWidget === 'undefined') {
+                        console.error('[GeoMapval Chat] ERROR: GeoMapvalChatWidget no está definido. Verifica que el script se cargó correctamente.');
+                        // Reintentar después de 1 segundo
+                        setTimeout(initChatWidget, 1000);
+                        return;
+                    }
+                    
+                    // Verificar que no se haya inicializado ya
+                    if (window.geomapvalChat) {
+                        console.log('[GeoMapval Chat] El widget ya está inicializado');
+                        return;
+                    }
+                    
+                    console.log('[GeoMapval Chat] Inicializando widget con conexión al backend...');
+                    
+                    try {
+                        window.geomapvalChat = new GeoMapvalChatWidget({
+                            onSendMessage: async function(message) {
+                                try {
+                                    console.log('[GeoMapval Chat] Enviando mensaje al backend:', message);
+                                    
+                                    const response = await fetch('/api/chat', {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                        },
+                                        body: JSON.stringify({ message: message })
+                                    });
+                                    
+                                    console.log('[GeoMapval Chat] Respuesta recibida, status:', response.status);
+                                    
+                                    if (!response.ok) {
+                                        const errorText = await response.text();
+                                        console.error('[GeoMapval Chat] Error en respuesta:', errorText);
+                                        throw new Error(`HTTP error! status: ${response.status}`);
+                                    }
+                                    
+                                    const data = await response.json();
+                                    console.log('[GeoMapval Chat] Datos recibidos:', data);
+                                    
+                                    // Manejar respuesta exitosa o con error
+                                    if (data.success && data.response) {
+                                        return data.response;
+                                    } else if (data.response) {
+                                        return data.response; // Aunque success sea false, mostrar el mensaje
+                                    } else if (data.error) {
+                                        return data.error;
+                                    } else {
+                                        return 'No se recibió respuesta del servidor.';
+                                    }
+                                } catch (error) {
+                                    console.error('[GeoMapval Chat] Error al enviar mensaje:', error);
+                                    return 'Error al conectar con el servidor. Por favor, verifica tu conexión e intenta nuevamente.';
+                                }
+                            }
+                        });
+                        
+                        console.log('[GeoMapval Chat] Widget inicializado correctamente');
+                        console.log('[GeoMapval Chat] onSendMessage configurado:', typeof window.geomapvalChat.onSendMessage);
+                    } catch (error) {
+                        console.error('[GeoMapval Chat] Error al inicializar widget:', error);
+                    }
+                }, 100); // Pequeño delay para asegurar que el script se cargó
+            }
+            
+            // Inicializar cuando el DOM esté listo
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initChatWidget);
+            } else {
+                // DOM ya está listo
+                initChatWidget();
+            }
+        })();
     </script>
 </body>
 </html>

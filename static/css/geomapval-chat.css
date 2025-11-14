@@ -1,0 +1,572 @@
+/**
+ * GeoMapvalChatWidget - Estilos CSS
+ * 
+ * Estilos para el widget de chat flotante de GeoMapval
+ * El botón se posiciona al lado del botón informativo en el header
+ */
+
+/* ============================================================================
+   CONTENEDOR DEL BOTÓN (al lado del botón informativo)
+   ============================================================================ */
+
+.geomapval-chat-button-container {
+    position: absolute;
+    top: 1.5rem;
+    right: calc(2rem + 60px); /* Al lado del botón informativo (48px + 12px gap) */
+    z-index: 100;
+}
+
+/* Ajuste para mobile */
+@media (max-width: 768px) {
+    .geomapval-chat-button-container {
+        right: calc(1rem + 60px);
+        top: 1rem;
+    }
+}
+
+/* ============================================================================
+   BOTÓN FLOTANTE
+   ============================================================================ */
+
+.geomapval-chat-button {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0ea5e9 0%, #10b981 100%);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3), 0 0 0 0 rgba(16, 185, 129, 0.4);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 100;
+    overflow: visible;
+}
+
+/* Animación de "breathing" cuando está cerrado */
+@keyframes geomapval-float {
+    0%, 100% {
+        transform: translateY(0) scale(1);
+    }
+    50% {
+        transform: translateY(-5px) scale(1.05);
+    }
+}
+
+.geomapval-chat-button:not(.active) {
+    animation: geomapval-float 2s ease-in-out infinite;
+}
+
+.geomapval-chat-button:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4), 0 0 0 4px rgba(16, 185, 129, 0.1);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.geomapval-chat-button:active {
+    transform: scale(0.95);
+}
+
+.geomapval-chat-button.active {
+    animation: none;
+    transform: scale(1);
+}
+
+/* Ícono de robot sofisticado */
+.geomapval-chat-robot-icon {
+    font-size: 24px;
+    color: white;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    z-index: 2;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.geomapval-chat-button:hover .geomapval-chat-robot-icon {
+    transform: scale(1.1) rotate(5deg);
+    filter: drop-shadow(0 4px 8px rgba(16, 185, 129, 0.4));
+}
+
+.geomapval-chat-button.active .geomapval-chat-robot-icon {
+    transform: rotate(90deg);
+}
+
+/* Efecto glow animado para el robot */
+.geomapval-chat-robot-glow {
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.4) 0%, transparent 70%);
+    opacity: 0;
+    animation: robotPulse 2s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes robotPulse {
+    0%, 100% {
+        opacity: 0.3;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.6;
+        transform: scale(1.1);
+    }
+}
+
+.geomapval-chat-button:hover .geomapval-chat-robot-glow {
+    animation-duration: 1s;
+    opacity: 0.5;
+}
+
+/* ============================================================================
+   PANEL DE CHAT
+   ============================================================================ */
+
+.geomapval-chat-panel {
+    position: fixed;
+    bottom: 4rem;
+    right: 2rem;
+    width: 420px;
+    height: 580px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 1rem;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(16, 185, 129, 0.2);
+    display: flex;
+    flex-direction: column;
+    z-index: 10001;
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+    pointer-events: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+}
+
+.geomapval-chat-panel.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: all;
+}
+
+/* Responsive: Mobile */
+@media (max-width: 768px) {
+    .geomapval-chat-button-container {
+        right: calc(1rem + 60px);
+        top: 1rem;
+    }
+
+    .geomapval-chat-panel {
+        width: calc(100vw - 2rem);
+        height: calc(100vh - 8rem);
+        bottom: 1rem;
+        right: 1rem;
+        max-height: 580px;
+    }
+
+    /* Backdrop en mobile */
+    .geomapval-chat-panel.open::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: -1;
+    }
+}
+
+/* ============================================================================
+   HEADER DEL CHAT
+   ============================================================================ */
+
+.geomapval-chat-header {
+    background: linear-gradient(135deg, #0284c7 0%, #10b981 100%);
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #334155;
+    flex-shrink: 0;
+}
+
+.geomapval-chat-header-content {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.geomapval-chat-header-icon {
+    width: 20px;
+    height: 20px;
+    color: white;
+    flex-shrink: 0;
+    stroke-width: 2.5;
+}
+
+.geomapval-chat-header-text {
+    min-width: 0;
+}
+
+.geomapval-chat-header-text h3 {
+    color: white;
+    font-size: 1.125rem;
+    font-weight: 700;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.geomapval-chat-header-text p {
+    color: #d1fae5;
+    font-size: 0.75rem;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.geomapval-chat-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+}
+
+.geomapval-chat-status {
+    display: none;
+    align-items: center;
+    gap: 0.375rem;
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(8px);
+    padding: 0.25rem 0.625rem;
+    border-radius: 9999px;
+}
+
+@media (min-width: 768px) {
+    .geomapval-chat-status {
+        display: flex;
+    }
+}
+
+.geomapval-chat-status-dot {
+    width: 8px;
+    height: 8px;
+    background: #6ee7b7;
+    border-radius: 50%;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.geomapval-chat-status span:last-child {
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.geomapval-chat-close {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.geomapval-chat-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.geomapval-chat-close svg {
+    width: 16px;
+    height: 16px;
+    stroke-width: 2.5;
+}
+
+/* ============================================================================
+   ZONA DE MENSAJES
+   ============================================================================ */
+
+.geomapval-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    scroll-behavior: smooth;
+}
+
+/* Scrollbar personalizado */
+.geomapval-chat-messages::-webkit-scrollbar {
+    width: 6px;
+}
+
+.geomapval-chat-messages::-webkit-scrollbar-track {
+    background: #1e293b;
+}
+
+.geomapval-chat-messages::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 3px;
+}
+
+.geomapval-chat-messages::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+}
+
+.geomapval-chat-message {
+    display: flex;
+    animation: messageSlideIn 0.2s ease-out;
+}
+
+@keyframes messageSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.geomapval-chat-message.user {
+    justify-content: flex-end;
+}
+
+.geomapval-chat-message.assistant {
+    justify-content: flex-start;
+}
+
+.geomapval-chat-bubble {
+    max-width: 80%;
+    padding: 0.625rem 1rem;
+    border-radius: 1rem;
+    word-wrap: break-word;
+}
+
+.geomapval-chat-bubble.user {
+    background: #10b981;
+    color: white;
+}
+
+.geomapval-chat-bubble.assistant {
+    background: #1e293b;
+    color: #f1f5f9;
+    border: 1px solid #334155;
+}
+
+.geomapval-chat-bubble p {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.geomapval-chat-time {
+    display: block;
+    font-size: 0.75rem;
+    margin-top: 0.375rem;
+    opacity: 0.7;
+}
+
+.geomapval-chat-bubble.user .geomapval-chat-time {
+    color: #d1fae5;
+}
+
+.geomapval-chat-bubble.assistant .geomapval-chat-time {
+    color: #94a3b8;
+}
+
+/* Estado "escribiendo..." */
+.geomapval-chat-typing {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    color: #cbd5e1;
+    font-size: 0.875rem;
+}
+
+.geomapval-chat-dots {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.geomapval-chat-dots span {
+    width: 6px;
+    height: 6px;
+    background: #6ee7b7;
+    border-radius: 50%;
+    animation: typingDot 0.6s ease-in-out infinite;
+}
+
+.geomapval-chat-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.geomapval-chat-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes typingDot {
+    0%, 100% {
+        transform: translateY(0);
+        opacity: 0.5;
+    }
+    50% {
+        transform: translateY(-6px);
+        opacity: 1;
+    }
+}
+
+/* ============================================================================
+   ÁREA DE ENTRADA
+   ============================================================================ */
+
+.geomapval-chat-input-area {
+    border-top: 1px solid #334155;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.5);
+    flex-shrink: 0;
+}
+
+.geomapval-chat-input-wrapper {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+}
+
+.geomapval-chat-input {
+    flex: 1;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 0.75rem;
+    padding: 0.75rem 1rem;
+    color: #f1f5f9;
+    font-size: 0.875rem;
+    resize: none;
+    min-height: 44px;
+    max-height: 128px;
+    overflow-y: auto;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.geomapval-chat-input:focus {
+    outline: none;
+    border-color: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+.geomapval-chat-input::placeholder {
+    color: #64748b;
+}
+
+.geomapval-chat-input::-webkit-scrollbar {
+    width: 6px;
+}
+
+.geomapval-chat-input::-webkit-scrollbar-track {
+    background: #1e293b;
+}
+
+.geomapval-chat-input::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 3px;
+}
+
+.geomapval-chat-send {
+    width: 44px;
+    height: 44px;
+    border-radius: 0.75rem;
+    background: linear-gradient(135deg, #0ea5e9 0%, #10b981 100%);
+    border: none;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.2s;
+}
+
+.geomapval-chat-send:hover:not(.disabled) {
+    transform: scale(1.05);
+}
+
+.geomapval-chat-send:active:not(.disabled) {
+    transform: scale(0.95);
+}
+
+.geomapval-chat-send.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.geomapval-chat-send svg {
+    width: 20px;
+    height: 20px;
+    stroke-width: 2.5;
+}
+
+.geomapval-chat-hint {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin: 0.5rem 0 0 0.25rem;
+}
+
+.geomapval-chat-hint kbd {
+    padding: 0.125rem 0.375rem;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 0.25rem;
+    font-size: 0.6875rem;
+    font-family: monospace;
+}
+
+/* ============================================================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================================================ */
+
+@media (max-width: 640px) {
+    .geomapval-chat-button-container {
+        right: 1rem;
+        top: 1rem;
+    }
+
+    .geomapval-chat-button {
+        width: 44px;
+        height: 44px;
+    }
+
+    .geomapval-chat-icon {
+        width: 20px;
+        height: 20px;
+    }
+
+    .geomapval-chat-pin {
+        width: 14px;
+        height: 14px;
+    }
+}
+
