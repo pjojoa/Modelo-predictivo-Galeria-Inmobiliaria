@@ -2094,7 +2094,8 @@ def generar_contexto_proyectos(df):
     # Priorizar proyectos con más información (exitosos primero, luego por score)
     df_ordenado = df.copy()
     if 'Score_Exito' in df_ordenado.columns:
-        df_ordenado = df_ordenado.sort_values('Score_Exito', ascending=False, na_last=True)
+        # Usar na_position en lugar de na_last (compatible con pandas 2.0+)
+        df_ordenado = df_ordenado.sort_values('Score_Exito', ascending=False, na_position='last')
     
     # Mostrar proyectos en formato compacto (máximo 200 para no exceder límites)
     muestra_proyectos = df_ordenado.head(200)
