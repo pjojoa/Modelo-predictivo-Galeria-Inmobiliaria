@@ -14,8 +14,8 @@ services:
         sync: false
         description: "API Key de Google Gemini para el chat asistente"
       - key: GEMINI_MODEL
-        value: "gemini-2.0-flash-exp"
-        description: "Modelo de Gemini a usar (por defecto: gemini-2.0-flash-exp)"
+        value: "gemini-1.5-flash"
+        description: "Modelo de Gemini a usar (por defecto: gemini-1.5-flash, recomendado para tier gratuito)"
     healthCheckPath: "/"
     autoDeploy: true
 

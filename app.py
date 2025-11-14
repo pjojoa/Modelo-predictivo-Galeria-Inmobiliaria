@@ -2173,8 +2173,8 @@ def chat_gemini():
                 'error': 'El mensaje no puede estar vacío'
             }), 400
         
-        # Modelo a usar (gemini-2.0-flash-exp es rápido y gratuito)
-        model_name = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash-exp')
+        # Modelo a usar (gemini-1.5-flash es el recomendado para tier gratuito con buenos límites)
+        model_name = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
         
         # Detectar si el usuario está preguntando por un proyecto específico o constructor
         buscar_proyecto_especifico = False
@@ -2415,9 +2415,12 @@ IMPORTANTE: Tienes acceso a TODOS los proyectos y TODAS las columnas. Usa esta i
         error_message = "Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta nuevamente."
         
         # Si es un error específico de API, dar más detalles
-        if 'API key' in str(e) or 'authentication' in str(e).lower():
+        error_str = str(e).lower()
+        if '429' in str(e) or 'quota' in error_str or 'rate limit' in error_str:
+            error_message = "Límite de solicitudes alcanzado. El modelo experimental puede tener límites restrictivos. Se ha cambiado a gemini-1.5-flash. Por favor, espera unos segundos e intenta nuevamente."
+        elif 'API key' in str(e) or 'authentication' in error_str:
             error_message = "Error de autenticación con la API de Gemini. Verifica la configuración."
-        elif 'quota' in str(e).lower() or 'limit' in str(e).lower():
+        elif 'quota' in error_str or 'limit' in error_str:
             error_message = "Se ha alcanzado el límite de solicitudes. Por favor, intenta más tarde."
         
         return jsonify({
